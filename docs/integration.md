@@ -338,6 +338,23 @@ const tools = createSearchTools({
   `readSession`. That declaration is the whole dependency: `ContextSearchPort` is
   an interface with those four methods, and `SessionQueryEngine` satisfies it
   structurally, so there is no adapter glue.
+- **The capability is only as open as the deployment.** A mounted
+  `ctx.sessionQuery` is not a working search: stock DSH ships the
+  `session-query-sqlite` row with `openAt: never`, which keeps exact reads,
+  titles, and lineage traces available while `searchSessions` and `searchEvents`
+  fail with `SESSION_QUERY_SEARCH_DISABLED` and SQLite is never opened. Tell your
+  operator the prerequisite rather than letting the ladder look broken: the index
+  opens in a later patch layer (the profile's own patch, or a `--patch` overlay)
+  with `openAt: first-search` — which defers both the `node:sqlite` import and the
+  build to the first search — plus a durable `path`, because an ephemeral
+  `:memory:` index rebuilds on every start. Two facts belong with the switch: the
+  build ingests every *stored* Session inside one failure boundary, so a single
+  stored log the Harness format ladder refuses (pre-v3 leftovers it will not
+  migrate, a corrupt log) fails every search rather than that one Session — check
+  an existing session store can fold before enabling search on it — and the first
+  search pays the whole build, after which the index is incremental. The read half
+  (`filterEvents`, `readSession`) needs no index, which is why `context_read`
+  keeps working while `context_search` does not.
 - **A `contextRef` grants nothing.** `context-hit-<base64url([sessionId, seq])>`
   names the generation that *recorded* an event, round-trips across restarts, and
   is rejected when it is not the exact canonical form this codec issued.
