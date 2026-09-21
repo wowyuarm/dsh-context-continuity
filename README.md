@@ -1,5 +1,10 @@
 # dsh-context-continuity — one continuous context across many Sessions
 
+[English](README.md) | [简体中文](README.zh.md)
+
+[![npm](https://img.shields.io/npm/v/@wowyuarm/dsh-context-continuity?style=flat-square)](https://www.npmjs.com/package/@wowyuarm/dsh-context-continuity)
+[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
+
 **A subject's context lived as one continuous timeline across many physical Sessions.**
 
 `dsh-context-continuity` is the engine behind context continuity for

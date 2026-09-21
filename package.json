@@ -28,7 +28,8 @@
   },
   "files": [
     "lib/**/*",
-    "README.md"
+    "README.md",
+    "README.zh.md"
   ],
   "scripts": {
     "check:boundaries": "node scripts/check-boundaries.mjs",
