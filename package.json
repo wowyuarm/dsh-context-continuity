@@ -3,6 +3,21 @@
   "version": "0.1.0",
   "description": "A subject's context lived as one continuous timeline across many physical Sessions: rollover, checkpoints, and lineage.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wowyuarm/dsh-context-continuity.git"
+  },
+  "keywords": [
+    "context-continuity",
+    "context-management",
+    "deepseek",
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "session-management",
+    "rollover",
+    "checkpoints"
+  ],
   "type": "module",
   "exports": {
     ".": {
