@@ -16,10 +16,11 @@ the engine to its own subject and its own domain through one contract.
 
 ## Status
 
-The engine core — the projection unit, the coordinator, and the lineage read —
-is extracted and covered by unit tests; no host consumes it yet. Team integration
-is a separate, later step (`dsh-agent-team` still carries its own copy of this
-mechanism); the model-facing tools factory is the next increment here.
+The engine core — the projection unit, the coordinator, the lineage read, and the
+model-facing tools factory — is extracted and covered by unit tests; no host
+consumes it yet. Team integration is a separate, later step (`dsh-agent-team`
+still carries its own copy of this mechanism); the search seam and the pressure
+policy are the next increments here.
 
 ## Layout
 
@@ -30,6 +31,7 @@ mechanism); the model-facing tools factory is the next increment here.
 | `src/projection-state.ts` | The read-only state one Session folds from its durable log, plus the host-contributed `DomainBoundary` anchor |
 | `src/projection.ts` | The fold itself, as the Harness `ProjectionDefinition` `contextContinuity`: one pure transition over committed events, one registration for every Session |
 | `src/timeline.ts` | The lineage read: a subject's generations walked, deduplicated, and priced into one bounded list of return anchors |
+| `src/tools.ts` | The three model-facing tools — `context_rollover`, `context_checkpoint`, `context_timeline` — as one factory over a host adapter |
 | `src/message-codec.ts` | Durable handoff and checkpoint-continuation messages, written and read through the shipped `plugin` snapshot form |
 | `src/coordinator.ts` | Rollover lifecycle: durable-result gate, turn-end and idle boundary, the swap, carried input, checkpoint continuations, crash recovery |
 | `src/stored-session-reader.ts` | One read seam for stored Sessions with five typed failure categories |
@@ -44,6 +46,10 @@ A host supplies only what the engine cannot know:
   projection unit and reading it back;
 - read an archived ancestor's stored log and measure one source's tokens, which
   is all `readContextTimeline` (the lineage walk) needs from you;
+- perform the three tools' effects — judge whether a `checkpointRef` is an anchor
+  this subject recorded, request a rollover, record a checkpoint, read the
+  timeline — and reword the subject-facing prose; the engine keeps the validation,
+  the anti-forgery gate, the `concludeTurn()` timing, and the renders;
 - contribute whatever its domain treats as a timeline anchor, and name its
   durable refs (`ContextProjectionHost`: `checkpointRefFor`, `boundaryRefFor`,
   `tracksCall`, `domainBoundaryOf`);
@@ -77,6 +83,12 @@ A host supplies only what the engine cannot know:
    to the ancestor generation this Session continues. The fold returns the same
    state reference for every event it does not care about, and reads nothing
    outside the log: every durable ref is the host's answer.
+5. **The tools are the product surface, so their safety is the engine's.**
+   `createContinuityTools()` owns the argument contract, the anti-forgery gate on
+   a supplied `checkpointRef`, the `concludeTurn()` timing, and the render shapes;
+   the host's adapter performs every effect, and the overridable prose is
+   subject-facing vocabulary only. A fabricated ref is a model-visible error
+   rather than a silent fresh rollover, in every host, by construction.
 
 ## Development
 

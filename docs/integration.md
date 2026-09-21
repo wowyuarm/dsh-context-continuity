@@ -8,9 +8,10 @@ single subject.
 
 The engine owns the universal mechanics — the idle-boundary generation swap,
 the admission gate, carried input, checkpoint continuations, the projection
-fold, the lineage walk, and the shared return-anchor policy. It knows nothing
-about what your subject is or what your domain treats as meaningful. You supply
-exactly that, through the seams below.
+fold, the lineage walk, the shared return-anchor policy, and the model-facing
+tools with their validation. It knows nothing about what your subject is or what
+your domain treats as meaningful. You supply exactly that, through the seams
+below.
 
 ## Status legend
 
@@ -26,7 +27,7 @@ exactly that, through the seams below.
 | Projection (`ContextProjectionHost` + fold unit) | shipped |
 | Coordinator (`ContextContinuityHost`) | shipped |
 | Timeline read (`readContextTimeline`) | shipped |
-| Tools factory (`createContinuityTools`) | planned |
+| Tools factory (`createContinuityTools`) | shipped |
 | Search scope (`SearchScopeProvider`) | planned |
 
 Everything a host reaches for is exported from the package root
@@ -248,29 +249,53 @@ const timeline = await readContextTimeline({
   history is then complete through the last listed generation, and never
   silently short.
 
-## Seam 6 — tools factory (planned)
+## Seam 6 — tools factory (shipped)
 
-The product surface. A factory produces the three model-facing tools from your
-adapter plus optional prose overrides; the engine keeps the safety-bearing
-validation.
+The product surface: one factory produces the three model-facing tools — with
+fixed names — from your adapter plus optional prose. The engine keeps the
+argument contract, the anti-forgery gate, the `concludeTurn()` timing, and the
+render shapes; you perform every effect.
 
 ```ts
-// planned shape
+import { createContinuityTools } from '@wowyuarm/dsh-context-continuity'
+
 const tools = createContinuityTools({
-  adapter,        // your requestRollover / recordCheckpoint / timeline entry points
-  codec,
-  text: {         // optional; sensible defaults
-    subjectNoun: 'Team Member',
-    rolloverChecklist: '…what a handoff must cover in your domain…',
-    checkpointGuidance: '…when to bury an anchor…',
-  },
+  // resolve the calling execution to its subject, then answer/act
+  isRestorableRef: (ref, exec) => timelineOffered(subjectOf(exec), ref),
+  requestRollover: (request, exec) => lifecycle.requestRollover(subjectOf(exec), request),
+  recordCheckpoint: ({ name, callId }, exec) => bindings.record(subjectOf(exec), name, callId),
+  timeline: ({ limit }, exec) => readTimeline(subjectOf(exec), limit),
+}, {              // optional; sensible domain-neutral defaults
+  subjectNoun: 'Team Member',
+  rolloverChecklist: '…what a handoff must cover in your domain…',
+  checkpointGuidance: '…when to bury an anchor…',
 })
+// register tools.rollover / tools.checkpoint / tools.timeline
 ```
 
-Non-overridable, always in the engine: the handoff-non-empty / byte-cap /
-related-files-shape / anti-forgery-`checkpointRef` validation, and the
-"a context change never rolls back an external effect" discipline. You override
-subject-facing wording only.
+- **The engine decides, you report the fact.** `isRestorableRef` answers whether
+  this subject recorded that ref and a timeline offered it; the engine turns a
+  `false` into a model-visible rejection. A fabricated ref never becomes a silent
+  fresh rollover, and your verdict must agree with the timeline's own `restorable`
+  flag (`readContextTimeline`) — one policy, two readers.
+- **`concludeTurn()` follows the durable intent, never precedes it.** The rollover
+  and checkpoint bodies conclude the turn only after your adapter resolves; a
+  rejection leaves the previous generation running and is what the model sees.
+  `context_timeline` is a read: it never concludes a turn.
+- **Validation has two layers.** The declared parameter schema rejects wrong
+  types at the tool boundary (`ToolArgsError`); the body owns what a JSON Schema
+  cannot express — a non-blank handoff within the 32 KiB cap, at most 32 related
+  files each with a non-blank path and reason, and a blank `checkpointRef` that
+  would otherwise read as absent. Either rejection is model-visible and touches
+  no host state.
+- **Names are fixed:** `context_rollover`, `context_checkpoint`,
+  `context_timeline`. The prose you override refers to them by name, so only
+  subject-facing vocabulary is yours: the anti-forgery sentence, "a context change
+  never rolls back an external effect", and the jobs/memory discipline are
+  engine-owned and survive any override.
+- **The contract is deliberately generic.** A tool value carries `ref`, `label`,
+  and `affectedTopics`, not one host's words for a Thread or a Claim: the same
+  factory serves every host. Your render-facing vocabulary belongs in `text`.
 
 ## Seam 7 — search scope (planned)
 

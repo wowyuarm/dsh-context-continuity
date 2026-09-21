@@ -24,6 +24,7 @@ const ALLOWED_PACKAGES = new Set([
   '@deepseek-ai/dsh-session',
   '@deepseek-ai/dsh-session-persistence',
   '@deepseek-ai/dsh-session-projection',
+  '@deepseek-ai/dsh-tools',
   'zod',
 ])
 

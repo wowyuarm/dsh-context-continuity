@@ -65,6 +65,20 @@ export type {
 } from './timeline.ts'
 
 export {
+  MAX_HANDOFF_CHARS,
+  MAX_RELATED_FILES,
+  createContinuityTools,
+} from './tools.ts'
+export type {
+  CheckpointToolRequest,
+  ContinuityToolAdapter,
+  ContinuityToolText,
+  ContinuityTools,
+  RelatedFileRequest,
+  RolloverToolRequest,
+} from './tools.ts'
+
+export {
   ContextMessageCodec,
   HANDOFF_SECTION_NAME,
   CHECKPOINT_SECTION_NAME,
