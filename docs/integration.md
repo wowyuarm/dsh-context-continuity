@@ -8,10 +8,10 @@ single subject.
 
 The engine owns the universal mechanics — the idle-boundary generation swap,
 the admission gate, carried input, checkpoint continuations, the projection
-fold, the lineage walk, the shared return-anchor policy, and the model-facing
-tools with their validation. It knows nothing about what your subject is or what
-your domain treats as meaningful. You supply exactly that, through the seams
-below.
+fold, the lineage walk, the shared return-anchor policy, the model-facing tools
+with their validation, and the bounded retrieval ladder. It knows nothing about
+what your subject is or what your domain treats as meaningful. You supply
+exactly that, through the seams below.
 
 ## Status legend
 
@@ -28,7 +28,7 @@ below.
 | Coordinator (`ContextContinuityHost`) | shipped |
 | Timeline read (`readContextTimeline`) | shipped |
 | Tools factory (`createContinuityTools`) | shipped |
-| Search scope (`SearchScopeProvider`) | planned |
+| Retrieval ladder (`createSearchTools`, `SearchScopeProvider`) | shipped |
 
 Everything a host reaches for is exported from the package root
 (`@wowyuarm/dsh-context-continuity`).
@@ -297,32 +297,77 @@ const tools = createContinuityTools({
   and `affectedTopics`, not one host's words for a Thread or a Claim: the same
   factory serves every host. Your render-facing vocabulary belongs in `text`.
 
-## Seam 7 — search scope (planned)
+## Seam 7 — the retrieval ladder (shipped)
 
-Search recalls across sessions, and **the engine never knows what a workspace or
-a team is** — it knows a subject and a set of sessions you authorize.
+`context_search` and `context_read` are the product surface for recall: a
+bounded ranked question, then one expanded neighbourhood. The engine owns the
+ladder's contract, the canonical `contextRef` codec, provenance folding, the
+budgets, and the return-anchor verdict; you own authorization, the query
+capability, the fold configuration, and the meter.
 
 ```ts
-// planned shape
-interface SearchScopeProvider<SubjectId> {
-  // Default: the subject's own lineage across all its sessions.
-  ownedSessions(id: SubjectId): SessionId[] | Promise<SessionId[]>
-  // Named scopes the subject MAY search — you define what they are.
-  //   Team: each workspace / team the member participates in.
-  //   Loom: usually none (one Individual, one line).
-  availableScopes?(id: SubjectId): { scopeId: string; label: string }[]
-  // Resolve a scope the model selected into the sessions it authorizes.
-  sessionsInScope?(id: SubjectId, scopeId: string): SessionId[] | Promise<SessionId[]>
-}
+import { createSearchTools } from '@wowyuarm/dsh-context-continuity'
+
+const tools = createSearchTools({
+  subject: exec => subjectOf(exec),
+  activeSessionId: exec => sessionIdOf(exec),
+  scope: {
+    // Default range: every Session this subject ever lived in.
+    ownedSessions: subject => ledger.sessionsOf(subject),
+    // Named scopes you define — a Team workspace or team; Loom usually has none.
+    availableScopes: subject => teamsOf(subject).map(team => ({ scopeId: team.id, label: team.name })),
+    sessionsInScope: (subject, scopeId) => ledger.sessionsOfSubjectIn(subject, scopeId),
+  },
+  query: ctx.sessionQuery,                       // the Harness capability, unchanged
+  config,                                        // the same fold config as seams 3 and 5
+  measureSource: (source, exec) => measuredTokensOf(source),
+  handoffAt: exec => handoffBudgetOf(exec),
+})
+// register tools.search / tools.read
 ```
 
-- `context_search({ query })` → `ownedSessions` (the subject's own history).
-- `context_search({ query, scope })` → `sessionsInScope` for a scope the model
-  picked from `availableScopes`.
-- **Security invariant:** scope is always derived by the host from subject
-  identity. A model-supplied `scopeId` only *selects* among what you already
-  authorized; a guessed Session id or another subject's Session is rejected. The
-  engine only ever searches within the set you return.
+- **Scope is derived by you, never declared by the model.** `ownedSessions` is
+  the default range; a model-supplied `scope` only *selects* among
+  `availableScopes`, an unoffered scope is a model-visible rejection that lists
+  the offered ones, and an empty authorized set refuses to run rather than
+  searching everything. Every query carries
+  `sessionFilters: [{ kind: 'id', values: <authorized> }]`, and a hit a provider
+  returns outside that set is dropped and counted, never presented.
+- **The query capability is injected, not reached for.** The engine is a pure
+  library with no `ctx` (see seam 5), so you pass `ctx.sessionQuery` — typed by
+  the published `@deepseek-ai/dsh-session-query` contract through the four reads
+  the ladder uses: `searchSessions`, `searchEvents`, `filterEvents`,
+  `readSession`. That declaration is the whole dependency: `ContextSearchPort` is
+  an interface with those four methods, and `SessionQueryEngine` satisfies it
+  structurally, so there is no adapter glue.
+- **A `contextRef` grants nothing.** `context-hit-<base64url([sessionId, seq])>`
+  names the generation that *recorded* an event, round-trips across restarts, and
+  is rejected when it is not the exact canonical form this codec issued.
+  Ownership is revalidated on every read against `ownedSessions` plus every
+  offered scope, because a read takes no scope parameter and a ref may have come
+  from a scoped search.
+- **One inherited experience appears once.** A seeded generation repeats its
+  source's events at the same seqs, so a hit below its `inheritedEventCount` is
+  folded along `parentSession` to its real source before dedupe; when that folds
+  away a generation's strongest match, its own span is searched so its later
+  experience is still represented.
+- **Returning is optional enrichment.** A hit carries a `checkpointRef` only when
+  its source generation is on the active lineage *and* an anchor whose completed
+  turn contains the hit passes the shared policy — the same `anchorCandidates`
+  and `anchorRejection` the timeline uses, so the two surfaces cannot disagree.
+  Otherwise the hit states `unavailable — <reason>`; a ref is never synthesized,
+  and an off-lineage branch is searchable but is not a return target.
+- **The model surface has no paging.** No cursor, no page size, no Session id, no
+  event type: the budgets are `CONTEXT_SEARCH_RESULT_LIMIT`,
+  `CONTEXT_READ_BEFORE` / `CONTEXT_READ_AFTER`, and `CONTEXT_READ_EVENT_CHARS`. A
+  capped answer says so and asks for a narrower query, time range, or `within`.
+- **`within` deep-searches one generation's own span.** Copying a hit's
+  `contextRef` into `within` searches the generation that recorded it, not its
+  inherited prefix — that history already belongs to, and is attributed to, its
+  own generation.
+- **Errors are readable, not raw.** Provider failures reach the model as one
+  sanitized sentence; a bad ref, an unoffered scope, a time bound without a
+  timezone, and a stale seq each say what was wrong and what to do instead.
 
 ## Compatibility red lines (durable identity)
 
@@ -338,3 +383,6 @@ Once a host ships, treat them as frozen:
    than misapplied.
 5. Legacy tool names — if a tool was renamed, keep folding the old name
    (`rolloverToolNames`); it is a log decoder, not an active alias.
+6. The `contextRef` prefix (`context-hit-`) — a conversation reads its own refs
+   back, so a new payload format arrives under a new prefix; an old ref then
+   rejects as a model-visible error instead of decoding into the wrong event.

@@ -16,11 +16,11 @@ the engine to its own subject and its own domain through one contract.
 
 ## Status
 
-The engine core — the projection unit, the coordinator, the lineage read, and the
-model-facing tools factory — is extracted and covered by unit tests; no host
-consumes it yet. Team integration is a separate, later step (`dsh-agent-team`
-still carries its own copy of this mechanism); the search seam and the pressure
-policy are the next increments here.
+The engine core — the projection unit, the coordinator, the lineage read, the
+model-facing tools factory, and the retrieval ladder — is extracted and covered
+by unit tests; no host consumes it yet. Team integration is a separate, later
+step (`dsh-agent-team` still carries its own copy of this mechanism); the
+pressure policy is the next increment here.
 
 ## Layout
 
@@ -30,7 +30,11 @@ policy are the next increments here.
 | `src/types.ts` | Subject, transition plan, rollover identity, trigger vocabulary |
 | `src/projection-state.ts` | The read-only state one Session folds from its durable log, plus the host-contributed `DomainBoundary` anchor |
 | `src/projection.ts` | The fold itself, as the Harness `ProjectionDefinition` `contextContinuity`: one pure transition over committed events, one registration for every Session |
+| `src/anchor.ts` | The one return-anchor policy — candidate enumeration, retained-cost estimate, rejection reason — shared by the timeline read and a search hit's enrichment, so the two can never disagree |
 | `src/timeline.ts` | The lineage read: a subject's generations walked, deduplicated, and priced into one bounded list of return anchors |
+| `src/search.ts` | The retrieval engine: authorization, provenance folding, the bounded search, and the neighbourhood read a `contextRef` expands into |
+| `src/search-tools.ts` | `context_search` and `context_read` — the model-facing ladder, with its descriptions, argument rules, output schemas, and renders |
+| `src/context-ref.ts` | The opaque canonical `contextRef` codec: `(sessionId, seq)` of the generation that recorded the event, and nothing else |
 | `src/tools.ts` | The three model-facing tools — `context_rollover`, `context_checkpoint`, `context_timeline` — as one factory over a host adapter |
 | `src/message-codec.ts` | Durable handoff and checkpoint-continuation messages, written and read through the shipped `plugin` snapshot form |
 | `src/coordinator.ts` | Rollover lifecycle: durable-result gate, turn-end and idle boundary, the swap, carried input, checkpoint continuations, crash recovery |
@@ -46,6 +50,10 @@ A host supplies only what the engine cannot know:
   projection unit and reading it back;
 - read an archived ancestor's stored log and measure one source's tokens, which
   is all `readContextTimeline` (the lineage walk) needs from you;
+- authorize recall: which Sessions a subject may search by default, which named
+  scopes it may select, and what one source costs — plus the query capability
+  itself (`ctx.sessionQuery`), which the engine uses through
+  `ContextSearchPort` but never reaches for;
 - perform the three tools' effects — judge whether a `checkpointRef` is an anchor
   this subject recorded, request a rollover, record a checkpoint, read the
   timeline — and reword the subject-facing prose; the engine keeps the validation,
@@ -83,7 +91,15 @@ A host supplies only what the engine cannot know:
    to the ancestor generation this Session continues. The fold returns the same
    state reference for every event it does not care about, and reads nothing
    outside the log: every durable ref is the host's answer.
-5. **The tools are the product surface, so their safety is the engine's.**
+5. **Recall is a ladder, and every rung is bounded.** `createSearchTools()` owns
+   the argument surface (no cursor, no page size, no Session id, no event type),
+   the canonical `contextRef`, provenance folding across a lineage, the
+   neighbourhood budget, and the render shapes; the host authorizes the scope and
+   supplies the query capability. A `contextRef` carries no authority — it names
+   `(sessionId, seq)` and is revalidated against the host's authorization on every
+   read — and a hit's `checkpointRef` is offered only from the same anchor policy
+   the timeline uses, never synthesized.
+6. **The tools are the product surface, so their safety is the engine's.**
    `createContinuityTools()` owns the argument contract, the anti-forgery gate on
    a supplied `checkpointRef`, the `concludeTurn()` timing, and the render shapes;
    the host's adapter performs every effect, and the overridable prose is

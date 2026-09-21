@@ -3,11 +3,12 @@
  * across many physical Session generations.
  *
  * A subject rolls forward into a fresh generation (`context_rollover`), returns
- * to a recorded anchor (`context_checkpoint` + rollover), and walks its own
- * lineage as one timeline (`context_timeline`) — physically many Session files,
- * one continuous context in the subject's understanding. The engine owns these
+ * to a recorded anchor (`context_checkpoint` + rollover), walks its own lineage
+ * as one timeline (`context_timeline`), and recalls what it has forgotten
+ * (`context_search` + `context_read`) — physically many Session files, one
+ * continuous context in the subject's understanding. The engine owns these
  * mechanics generically; a host binds them to its own subject and domain
- * through {@link ContextContinuityHost}.
+ * through {@link ContextContinuityHost} and {@link ContextSearchAdapter}.
  * @module @wowyuarm/dsh-context-continuity
  */
 
@@ -77,6 +78,37 @@ export type {
   RelatedFileRequest,
   RolloverToolRequest,
 } from './tools.ts'
+
+export {
+  CONTEXT_SEARCH_RESULT_LIMIT,
+  CONTEXT_READ_BEFORE,
+  CONTEXT_READ_AFTER,
+  CONTEXT_READ_EVENT_CHARS,
+  readContextHit,
+  searchContext,
+} from './search.ts'
+export type {
+  ContextHitAnchor,
+  ContextHitGeneration,
+  ContextReadEvent,
+  ContextReadRequest,
+  ContextReadResult,
+  ContextSearchAdapter,
+  ContextSearchDrops,
+  ContextSearchHit,
+  ContextSearchPort,
+  ContextSearchRequest,
+  ContextSearchResult,
+  ContextSearchScope,
+  SearchScopeOption,
+  SearchScopeProvider,
+} from './search.ts'
+
+export { CONTEXT_REF_PREFIX, contextRefFor, parseContextRef } from './context-ref.ts'
+export type { ContextRefTarget } from './context-ref.ts'
+
+export { createSearchTools } from './search-tools.ts'
+export type { ContextSearchTools, SearchToolText } from './search-tools.ts'
 
 export {
   ContextMessageCodec,

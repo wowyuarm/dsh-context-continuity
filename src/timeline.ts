@@ -21,6 +21,10 @@
  *   rule — a boundary is a selectable default anchor exactly when it resolved
  *   at a completed turn and is attributable to exactly one topic.
  *
+ * That rule and the pricing are not this module's private judgement: they live
+ * in {@link anchor.ts} because a search hit's enrichment answers the same
+ * question and must answer it identically.
+ *
  * An unreadable ancestor ends the walk where it broke and is reported in
  * {@link ContextTimeline.incompleteFrom}: history is then complete through the
  * last listed generation and provably absent beyond it. It is never a
@@ -29,7 +33,8 @@
  */
 
 import type { SessionEvent, SessionHeader, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
-import { foldContextProjection, type ContextProjectionConfig, type ContextProjectionHost } from './projection.ts'
+import { anchorCandidates, anchorRejection, retainedEstimate, type AnchorCandidate, type AnchorSourceKind } from './anchor.ts'
+import { foldContextProjection, type ContextProjectionConfig } from './projection.ts'
 import type { ContextProjectionState } from './projection-state.ts'
 import type { StoredSessionReadResult } from './stored-session-reader.ts'
 
@@ -52,7 +57,7 @@ export interface ContextTimelineSource {
 }
 
 /** Which structural source produced one timeline item. */
-export type ContextTimelineSourceKind = 'checkpoint' | 'boundary' | 'head'
+export type ContextTimelineSourceKind = AnchorSourceKind
 
 /**
  * One priced return anchor. A non-restorable item is still returned — with its
@@ -97,18 +102,6 @@ export interface ContextTimeline {
   readonly incompleteFrom?: { readonly sessionId: SessionId; readonly reason: string }
 }
 
-/** One structural anchor inside one generation's folded state. */
-interface TimelineCandidate {
-  readonly ref: string
-  readonly label: string
-  readonly source: ContextTimelineSourceKind
-  readonly kind?: string
-  readonly seq: number
-  readonly turnEndSeq: number
-  /** The boundary's own topics; empty for checkpoints and the head. */
-  readonly attributions: readonly string[]
-}
-
 /** Everything one timeline read needs; the engine supplies all policy, the host all mechanism. */
 export interface ContextTimelineRequest {
   /** The generation the subject lives in now. */
@@ -133,20 +126,6 @@ export interface ContextTimelineRequest {
   readonly maxAncestors?: number
 }
 
-/**
- * Monotonic anchor-share estimate of a seed's retained cost, priced in the
- * SOURCE Session's own measurement: the fraction of the source log the seed
- * prefix covers, scaled to the source's replayed token count. The anchor
- * position is exact and the share grows monotonically toward the source's head,
- * so a large ancestor's anchor prices at the ancestor's real size even inside a
- * small current generation.
- */
-function retainedEstimate(sourceUsageTokens: number, sourceLength: number, anchorTurnEndSeq: number): number {
-  if (sourceLength <= 0) return sourceUsageTokens
-  const share = Math.min(1, Math.max(0, (anchorTurnEndSeq + 1) / sourceLength))
-  return Math.round(sourceUsageTokens * share)
-}
-
 /** The topics the host had attributed to boundaries resolved by one anchor, order-stable and deduplicated. */
 function topicsThrough(state: ContextProjectionState, turnEndSeq: number): readonly string[] {
   const topics: string[] = []
@@ -157,94 +136,9 @@ function topicsThrough(state: ContextProjectionState, turnEndSeq: number): reado
   return topics
 }
 
-/**
- * The structural anchors of one generation, newest first: resolved checkpoints,
- * resolved host boundaries, and — for the current generation only — its head.
- *
- * An unresolved anchor is not a candidate: a return target must be a turn the
- * log proved completed. An archived generation's head is not a candidate
- * either: "the current working set" is precisely what that generation is not,
- * and its marker ref would be ambiguous across sources.
- */
-function timelineCandidates(
-  state: ContextProjectionState,
-  host: ContextProjectionHost,
-  limit: number,
-  includeHead: boolean,
-): readonly TimelineCandidate[] {
-  const candidates: TimelineCandidate[] = []
-  for (const checkpoint of state.checkpoints) {
-    if (checkpoint.turnEndSeq === -1) continue
-    candidates.push({
-      ref: checkpoint.checkpointRef,
-      label: checkpoint.name,
-      source: 'checkpoint',
-      seq: checkpoint.resultSeq,
-      turnEndSeq: checkpoint.turnEndSeq,
-      attributions: [],
-    })
-  }
-  for (const boundary of state.boundaries) {
-    if (boundary.turnEndSeq === -1) continue
-    candidates.push({
-      // The fold stores no boundary ref: it is derived here, from the source's
-      // own identity and the anchoring seq, which is what keeps two
-      // generations' identical seqs from colliding.
-      ref: host.boundaryRefFor(state.sessionId, boundary.resultSeq),
-      label: boundary.label,
-      source: 'boundary',
-      kind: boundary.kind,
-      seq: boundary.resultSeq,
-      turnEndSeq: boundary.turnEndSeq,
-      attributions: boundary.attributions,
-    })
-  }
-  if (includeHead && state.lastTurnEndSeq !== -1) {
-    candidates.push({
-      ref: `head:${state.lastTurnEndSeq}`,
-      label: 'current head',
-      source: 'head',
-      seq: state.lastTurnEndSeq,
-      turnEndSeq: state.lastTurnEndSeq,
-      attributions: [],
-    })
-  }
-  return candidates.sort((a, b) => b.turnEndSeq - a.turnEndSeq || b.seq - a.seq).slice(0, limit)
-}
-
-/**
- * Why one candidate is not a selectable return anchor, or `undefined` when it
- * is. The order is deliberate: what the anchor *is* decides before what it
- * costs, so a multi-topic boundary never reads as a budget problem.
- */
-function rejectionReason(
-  candidate: TimelineCandidate,
-  retainedTokens: number,
-  sourceUsage: number | undefined,
-  handoffAt: number,
-): string | undefined {
-  if (candidate.source === 'head') return 'the head is the current working set; returning to it discards nothing'
-  if (sourceUsage === undefined) {
-    // Never price an unknown as zero, and never let an unprovable budget look
-    // like an available target.
-    return 'the source Session\'s context cost cannot be measured, so the return budget cannot be proven'
-  }
-  if (candidate.source === 'boundary' && candidate.attributions.length !== 1) {
-    return candidate.attributions.length === 0
-      ? 'no single topic is attributable to this boundary'
-      : 'multiple topics entered the context through this boundary; write a fresh handoff instead'
-  }
-  if (retainedTokens >= handoffAt) {
-    return candidate.source === 'boundary'
-      ? 'retained context would not materially shrink the working set'
-      : 'retained context would be at or above the handoff budget'
-  }
-  return undefined
-}
-
 /** Price and annotate one candidate of one source; nothing here mutates the fold. */
 function itemFor(
-  candidate: TimelineCandidate,
+  candidate: AnchorCandidate,
   state: ContextProjectionState,
   source: ContextTimelineSource,
   isCurrent: boolean,
@@ -262,7 +156,7 @@ function itemFor(
     : isCurrent
       ? Math.max(0, request.currentUsageTokens - retainedTokens)
       : request.currentUsageTokens
-  const reason = rejectionReason(candidate, retainedTokens, sourceUsage, request.handoffAt)
+  const reason = anchorRejection(candidate, retainedTokens, sourceUsage, request.handoffAt)
   return {
     ref: candidate.ref,
     label: candidate.label,
@@ -304,7 +198,7 @@ export async function readContextTimeline(request: ContextTimelineRequest): Prom
     })
     const measured = request.measureSource === undefined ? undefined : await request.measureSource(source)
     const sourceUsage = typeof measured === 'number' && Number.isFinite(measured) ? measured : undefined
-    for (const candidate of timelineCandidates(state, request.config.host, limit, isCurrent)) {
+    for (const candidate of anchorCandidates(state, request.config.host, isCurrent).slice(0, limit)) {
       if (seen.has(candidate.ref)) continue
       seen.add(candidate.ref)
       items.push(itemFor(candidate, state, source, isCurrent, sourceUsage, request))
