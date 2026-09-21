@@ -2,11 +2,13 @@
  * The context-continuity projection: the one fold over a Session's durable
  * events, as the Harness projection framework drives it.
  *
- * Two rules carry this unit, and the spec pins both: an event the unit does not
+ * Rules carry this unit, and the spec pins them: an event the unit does not
  * care about returns the **same** state reference (an unchanged reference is
- * what suppresses all downstream work), and nothing is read from outside the
- * log — every durable ref is the host's own answer, derived from the recorded
- * Session identity and the successful tool call. The remaining groups walk the
+ * what suppresses all downstream work), nothing is read from outside the log —
+ * every durable ref is the host's own answer, derived from the recorded Session
+ * identity and the successful tool call — and one registered definition serves
+ * every Session, seeded successors included, because identity and the
+ * fork-inherited cut travel in the state. The remaining groups walk the
  * transitions the coordinator later acts on: open-call pairing, the single
  * pending intent per unresolved turn, carry candidates, continuation delivery,
  * and host-contributed boundaries.
@@ -30,6 +32,7 @@ import {
   createContextProjectionDefinition,
   emptyContextProjectionState,
   foldContextProjection,
+  type ContextFoldTarget,
   type ContextProjectionConfig,
   type ContextProjectionHost,
   type DomainBoundaryContribution,
@@ -178,7 +181,14 @@ interface HarnessOptions {
   readonly ephemeral?: (message: UserMessage) => boolean
   readonly rolloverToolNames?: readonly string[]
   readonly checkpointToolName?: string
+  /** The Session this harness folds by default; a test may fold another one through the same definition. */
   readonly sessionId?: string
+  readonly inheritedEventCount?: number
+}
+
+/** The header the framework hands `init` for one Session. */
+function headerOf(sessionId: string): SessionHeader {
+  return { id: sessionId } as SessionHeader
 }
 
 /**
@@ -203,25 +213,31 @@ function projectionHarness(options: HarnessOptions = {}) {
         }),
   }
   const config: ContextProjectionConfig = {
-    sessionId: options.sessionId ?? SESSION,
     codec,
     host,
     ...(options.rolloverToolNames === undefined ? {} : { rolloverToolNames: options.rolloverToolNames }),
     ...(options.checkpointToolName === undefined ? {} : { checkpointToolName: options.checkpointToolName }),
   }
   const definition = createContextProjectionDefinition(config)
-  /** Fold one log the way the framework drives the registered unit. */
-  const fold = (events: readonly SessionEvent[]): ContextProjectionState => {
-    let state = definition.init({} as SessionHeader, SessionLogOffset(0))
+  const target: ContextFoldTarget = {
+    sessionId: options.sessionId ?? SESSION,
+    inheritedEventCount: options.inheritedEventCount ?? 0,
+  }
+  /** Fold one log the way the framework drives the registered unit for one Session. */
+  const foldFor = (session: ContextFoldTarget, events: readonly SessionEvent[]): ContextProjectionState => {
+    let state = definition.init(headerOf(session.sessionId), SessionLogOffset(session.inheritedEventCount ?? 0))
     for (const event of events) state = definition.apply(state, event)
     return state
   }
+  const fold = (events: readonly SessionEvent[]): ContextProjectionState => foldFor(target, events)
   return {
     host,
     config,
+    target,
     definition,
     asked,
     fold,
+    foldFor,
     apply: (state: ContextProjectionState, event: SessionEvent): ContextProjectionState => definition.apply(state, event),
   }
 }
@@ -248,16 +264,24 @@ describe('projection definition', () => {
     const { definition } = projectionHarness()
     expect(definition.key).toBe(CONTEXT_CONTINUITY_PROJECTION_KEY)
     expect(definition.key).toBe('contextContinuity')
-    expect(definition.stateVersion).toBe(1)
+    // v2: the state carries the Session identity it folds and the inherited
+    // cut, so one registration can serve every Session.
+    expect(definition.stateVersion).toBe(2)
     // Host-only: the state is read through the registry, never published as a
     // client view.
     expect('wire' in definition).toBe(false)
   })
 
-  it('starts from the empty state and validates every state it produces', () => {
-    const { definition, fold } = projectionHarness()
-    const initial = definition.init({} as SessionHeader, SessionLogOffset(0))
-    expect(initial).toEqual(emptyContextProjectionState())
+  it('starts from the empty state of the Session being folded', () => {
+    const { definition, fold, target } = projectionHarness()
+    const initial = definition.init(headerOf(SESSION), SessionLogOffset(0))
+    expect(initial).toEqual(emptyContextProjectionState(target))
+    expect(initial.sessionId).toBe(SESSION)
+    expect(initial.inheritedEventCount).toBe(0)
+
+    const seeded = definition.init(headerOf(OTHER_SESSION), SessionLogOffset(7))
+    expect(seeded.sessionId).toBe(OTHER_SESSION)
+    expect(seeded.inheritedEventCount).toBe(7)
 
     const folded = fold([
       turnStart(1),
@@ -266,19 +290,31 @@ describe('projection definition', () => {
       turnEnd(1),
     ])
     expect(contextProjectionStateSchema.safeParse(folded).success).toBe(true)
-    expect(contextProjectionStateSchema.safeParse(emptyContextProjectionState()).success).toBe(true)
+    expect(contextProjectionStateSchema.safeParse(emptyContextProjectionState(target)).success).toBe(true)
   })
 
   it('refuses a cached row written by another shape instead of folding it onward', () => {
+    const { target } = projectionHarness()
     // `stateSchema` is what the framework runs before it seeds a fold from a
     // persisted row: a row from an older vocabulary (here the Team's
     // pre-extraction `seenThreads`) must be discarded, not forward-applied.
-    const legacy: Record<string, unknown> = { ...emptyContextProjectionState(), seenThreads: [] }
+    const legacy: Record<string, unknown> = { ...emptyContextProjectionState(target), seenThreads: [] }
     expect(contextProjectionStateSchema.safeParse(legacy).success).toBe(false)
 
-    const missing: Record<string, unknown> = { ...emptyContextProjectionState() }
+    const missing: Record<string, unknown> = { ...emptyContextProjectionState(target) }
     delete missing['seenTopics']
     expect(contextProjectionStateSchema.safeParse(missing).success).toBe(false)
+
+    // A v1 row predates the Session identity and the inherited cut; it must be
+    // discarded (the `stateVersion` bump is the deliberate form of the same
+    // decision) rather than folded into a state that names nothing.
+    const versionOne: Record<string, unknown> = { ...emptyContextProjectionState(target) }
+    delete versionOne['sessionId']
+    delete versionOne['inheritedEventCount']
+    expect(contextProjectionStateSchema.safeParse(versionOne).success).toBe(false)
+
+    const negativeCut: Record<string, unknown> = { ...emptyContextProjectionState(target), inheritedEventCount: -1 }
+    expect(contextProjectionStateSchema.safeParse(negativeCut).success).toBe(false)
   })
 })
 
@@ -500,14 +536,6 @@ describe('checkpoints', () => {
     expect(fold([...log, closed]).checkpoints[0]?.turnEndSeq).toBe(closed.seq)
   })
 
-  it('derives a per-Session ref, so one repeated call id never collides', () => {
-    const log = (): SessionEvent[] => [turnStart(1), ...checkpointPair(1, 'call-repeat', 'anchor')]
-    const first = projectionHarness({ sessionId: SESSION }).fold(log())
-    const second = projectionHarness({ sessionId: OTHER_SESSION }).fold(log())
-    expect(first.checkpoints[0]?.checkpointRef).toBe(`context-checkpoint:${SESSION}:call-repeat`)
-    expect(second.checkpoints[0]?.checkpointRef).toBe(`context-checkpoint:${OTHER_SESSION}:call-repeat`)
-  })
-
   it('records nothing for a checkpoint call without a usable name', () => {
     for (const raw of ['{"name":', '{}', JSON.stringify({ name: '' }), JSON.stringify({ name: '   ' })]) {
       const { fold } = projectionHarness()
@@ -520,6 +548,98 @@ describe('checkpoints', () => {
       expect(state.checkpoints, raw).toEqual([])
       expect(state.openCalls, raw).toEqual([])
     }
+  })
+})
+
+describe('one definition, many Sessions', () => {
+  /**
+   * One log renumbered so `seq` is the event's position in it — what a real
+   * Session log guarantees, and the unit a fork-inherited prefix is counted in.
+   * The specs above fold synthetic logs whose seqs come from a shared counter,
+   * which is fine while the cut is zero and wrong the moment it is not.
+   */
+  function localSeqs(events: readonly SessionEvent[]): SessionEvent[] {
+    return events.map((event, index) => ({ ...event, seq: SessionSeq(index) }) as SessionEvent)
+  }
+
+  it('derives every ref from the state\'s own Session, so a repeated call id never collides', () => {
+    const { foldFor } = projectionHarness()
+    const log = (): SessionEvent[] => localSeqs([turnStart(1), ...checkpointPair(1, 'call-shared', 'anchor')])
+    const first = foldFor({ sessionId: SESSION }, log())
+    const second = foldFor({ sessionId: OTHER_SESSION }, log())
+    expect(first.sessionId).toBe(SESSION)
+    expect(second.sessionId).toBe(OTHER_SESSION)
+    expect(first.checkpoints[0]?.checkpointRef).toBe(`context-checkpoint:${SESSION}:call-shared`)
+    expect(second.checkpoints[0]?.checkpointRef).toBe(`context-checkpoint:${OTHER_SESSION}:call-shared`)
+  })
+
+  it('skips the fork-inherited prefix, so an ancestor\'s facts are never re-keyed as this generation\'s', () => {
+    const { foldFor } = projectionHarness({
+      tracksCall: name => name === 'team_message',
+      domainBoundaryOf: firstArrivalBoundary,
+    })
+    const ancestorRef = `context-checkpoint:${SESSION}:call-cp`
+    const prefix: SessionEvent[] = [
+      turnStart(1),
+      ...checkpointPair(1, 'call-cp', 'ancestor anchor'),
+      userMessageEvent(codec.createCheckpointContinuationMessage(ancestorRef)),
+      ...rolloverPair(1, 'call-r', { handoff: 'the handoff that opened this generation' }),
+      userMessageEvent(notice('Thread: thread:1111-aaaa handover')),
+      inboxSpliced([external('queued behind the ancestor\'s intent')]),
+      turnEnd(1),
+    ]
+    const own: SessionEvent[] = [
+      turnStart(2),
+      ...checkpointPair(2, 'call-own', 'this generation\'s anchor'),
+      turnEnd(2),
+    ]
+    const log = localSeqs([...prefix, ...own])
+    const state = foldFor({ sessionId: OTHER_SESSION, inheritedEventCount: prefix.length }, log)
+
+    // Everything the ancestor's prefix would have contributed under the
+    // child's identity is absent: no re-keyed checkpoint, no inherited
+    // rollover intent, no inherited continuation delivery, no carried input,
+    // no ancestor boundary or topic.
+    expect(state.checkpoints.map(entry => entry.checkpointRef)).toEqual([`context-checkpoint:${OTHER_SESSION}:call-own`])
+    expect(state.pending).toBeNull()
+    expect(state.continuations).toEqual([])
+    expect(state.carriedCandidates).toEqual([])
+    expect(state.boundaries).toEqual([])
+    expect(state.seenTopics).toEqual([])
+    // Its own span does fold, and the cut it was seeded with is remembered.
+    expect(state.lastTurn).toBe(2)
+    expect(state.lastTurnEndSeq).toBe(log.at(-1)!.seq)
+    expect(state.inheritedEventCount).toBe(prefix.length)
+
+    // The same events folded as the generation they belong to do carry those
+    // facts: the prefix is real, it is simply not this Session's.
+    const asAncestor = foldFor({ sessionId: SESSION }, localSeqs(prefix))
+    expect(asAncestor.pending).not.toBeNull()
+    expect(asAncestor.checkpoints).toHaveLength(1)
+    expect(asAncestor.continuations).toHaveLength(1)
+    expect(asAncestor.carriedCandidates).toHaveLength(1)
+    expect(asAncestor.seenTopics).toEqual(['thread:1111-aaaa'])
+  })
+
+  it('treats the inherited cut as a floor and returns the same reference below it', () => {
+    const { apply, foldFor } = projectionHarness()
+    const prefix: SessionEvent[] = [
+      turnStart(1),
+      ...rolloverPair(1, 'call-r', { handoff: 'the ancestor\'s intent' }),
+      turnEnd(1),
+    ]
+    const log = localSeqs([...prefix, turnStart(2)])
+    const state = foldFor({ sessionId: OTHER_SESSION, inheritedEventCount: prefix.length }, log.slice(0, prefix.length))
+    expect(state).toEqual(emptyContextProjectionState({ sessionId: OTHER_SESSION, inheritedEventCount: prefix.length }))
+
+    for (const event of log.slice(0, prefix.length)) {
+      expect(Object.is(apply(state, event), state), `${event.type}@${String(event.seq)} allocated`).toBe(true)
+    }
+    // The cut is exclusive: the first event this Session owns folds normally.
+    const firstOwn = log.at(-1)!
+    const next = apply(state, firstOwn)
+    expect(Object.is(next, state)).toBe(false)
+    expect(next.lastTurn).toBe(2)
   })
 })
 
@@ -539,10 +659,10 @@ describe('continuation delivery', () => {
   })
 
   it('completes a host-seeded scheduled continuation instead of adding a second', () => {
-    const { definition } = projectionHarness()
+    const { definition, target } = projectionHarness()
     const checkpointRef = `context-checkpoint:${SESSION}:call-scheduled`
     const scheduled: ContextProjectionState = {
-      ...emptyContextProjectionState(),
+      ...emptyContextProjectionState(target),
       continuations: [{ checkpointRef, deliveredSeq: -1 }],
     }
     expect(continuationDelivered(scheduled, checkpointRef)).toBe(false)
@@ -767,7 +887,7 @@ describe('cold fold and live fold', () => {
     const log = fullLog()
     const harness = projectionHarness({ tracksCall: name => name === 'team_message', domainBoundaryOf: firstArrivalBoundary })
     const live = harness.fold(log)
-    const cold = foldContextProjection(log, harness.config)
+    const cold = foldContextProjection(log, harness.config, harness.target)
     expect(live).toEqual(cold)
     // The log really did exercise every family: an equal-but-empty fold would
     // pass the assertion above for the wrong reason.
@@ -782,8 +902,8 @@ describe('cold fold and live fold', () => {
 
   it('a checkpoint delivered continuation keeps its scheduled-then-delivered shape across a refold', () => {
     const log = fullLog()
-    const { config } = projectionHarness()
-    const cold = foldContextProjection(log, config)
+    const { config, target } = projectionHarness()
+    const cold = foldContextProjection(log, config, target)
     expect(cold.continuations).toEqual([{ checkpointRef: `context-checkpoint:${SESSION}:call-cp`, deliveredSeq: expect.any(Number) }])
   })
 })

@@ -66,10 +66,13 @@ A host supplies only what the engine cannot know:
    state through `host.projectionForSubject()`, so a host may fold by hand or
    through the Harness projection framework. The engine also *ships* that fold:
    `createContextProjectionDefinition()` returns the host-only unit
-   `contextContinuity` (state version 1), and the framework owns the drive —
-   replay, incremental application, persistence, and invalidation. The fold
-   returns the same state reference for every event it does not care about, and
-   reads nothing outside the log: every durable ref is the host's answer.
+   `contextContinuity` (state version 2), registered once per host — the
+   framework keeps one unit per projection key and drives it for every Session.
+   What a closure cannot hold lives in the state instead: the Session identity
+   that keys every derived ref, and the inherited cut below which events belong
+   to the ancestor generation this Session continues. The fold returns the same
+   state reference for every event it does not care about, and reads nothing
+   outside the log: every durable ref is the host's answer.
 
 ## Development
 

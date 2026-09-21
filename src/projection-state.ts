@@ -4,6 +4,13 @@
  * cold fold over stored events and the live incremental fold converge on the
  * same value — there is no second store.
  *
+ * The state also carries the Session identity it folds and the length of the
+ * prefix that Session inherited from the generation it continues. Both belong
+ * here rather than in a fold closure: the framework keys one projection unit
+ * per key and drives it for every Session, so identity must travel in the
+ * state, and a seeded Session's log repeats its ancestor's events — which are
+ * the ancestor's facts, not this generation's.
+ *
  * The universal fields (checkpoints, pending rollover, quiet continuations,
  * carried candidates, open calls, turn cursors) are owned by the engine. The
  * one host-specific dimension is {@link ContextProjectionState.boundaries}:
@@ -89,6 +96,20 @@ export interface DomainBoundary {
 
 /** The read-only projection of one Session's context-continuity state. */
 export interface ContextProjectionState {
+  /**
+   * The Session this state folds. It keys every durable ref the fold derives
+   * (`checkpointRefFor`, boundary naming), so one registered unit serves every
+   * Session and two generations never collide on a repeated call id.
+   */
+  readonly sessionId: string
+  /**
+   * The length of the fork-inherited prefix: events whose `seq` is below this
+   * cut belong to the ancestor generation this Session continues and are
+   * skipped unchanged. Folding them here would re-key the ancestor's record
+   * under this Session's identity and re-derive its rollover intent as this
+   * generation's own pending swap.
+   */
+  readonly inheritedEventCount: number
   /** Checkpoints recorded by a successful call, resolved ones anchored to their turn end. */
   readonly checkpoints: readonly ContextCheckpointEntry[]
   /** Rollover intent awaiting its containing turn end, at most one. */

@@ -5,7 +5,7 @@
  * The fold is a Harness `ProjectionDefinition`, so the framework owns the
  * drive — replay on attach, incremental application per committed event,
  * persistence, and cache invalidation — and this module owns only the pure
- * transition. Two rules hold every field here to the log alone:
+ * transition. Three rules hold every field here to the log alone:
  *
  * - `apply` never mutates: an event this unit does not care about returns the
  *   **same state reference**, because an unchanged reference is what tells the
@@ -14,6 +14,11 @@
  *   deterministically by the host from `(sessionId, callId)` or
  *   `(sessionId, seq)`, so a cold fold over stored events and the live
  *   incremental fold converge on exactly one state.
+ * - One registration serves every Session. The framework keeps one unit per
+ *   projection key, so the Session identity and the fork-inherited cut live in
+ *   the state, seeded by `init` from the header — never in the definition's
+ *   closure. Events below the cut are the ancestor's facts and stay folded
+ *   under the ancestor's identity.
  *
  * The engine owns the universal structure — checkpoint records, the pending
  * rollover intent, quiet-continuation delivery, carry candidates, open calls,
@@ -108,16 +113,25 @@ export interface ContextProjectionHost extends Pick<ContextContinuityHost<never>
   domainBoundaryOf?(input: DomainBoundaryInput): DomainBoundaryContribution | undefined
 }
 
-/** How one fold instance reads and names its facts. */
+/** How one fold reads the log: the codec it recognizes and the host it asks. */
 export interface ContextProjectionConfig {
-  /** The Session whose log this fold covers; it keys every derived ref. */
-  readonly sessionId: string
   /** The codec recognizing this engine's own handoff and continuation envelopes. */
   readonly codec: ContextMessageCodec
   readonly host: ContextProjectionHost
   /** Overrides the engine's own tool names, e.g. a legacy alias a host still folds. */
   readonly rolloverToolNames?: readonly string[]
   readonly checkpointToolName?: string
+}
+
+/**
+ * The Session one fold covers. Its identity keys every derived ref, and the
+ * inherited cut is the length of the prefix a seeded Session repeated from the
+ * ancestor generation it continues.
+ */
+export interface ContextFoldTarget {
+  readonly sessionId: string
+  /** Omit for a Session whose log inherited no prefix. */
+  readonly inheritedEventCount?: number
 }
 
 const relatedFileSchema = z.object({ path: z.string().min(1), reason: z.string() }).strict()
@@ -159,6 +173,8 @@ const domainBoundarySchema = z.object({
  * decision) rather than forward-applied into nonsense.
  */
 export const contextProjectionStateSchema: z.ZodType<ContextProjectionState> = z.object({
+  sessionId: z.string().min(1),
+  inheritedEventCount: z.number().int().nonnegative(),
   checkpoints: z.array(checkpointEntrySchema),
   pending: pendingIntentSchema.nullable(),
   continuations: z.array(z.object({ checkpointRef: z.string().min(1), deliveredSeq: z.number().int() }).strict()),
@@ -176,9 +192,11 @@ declare module '@deepseek-ai/dsh-session-projection/types' {
   }
 }
 
-/** The empty state of one Session with no continuity facts yet. */
-export function emptyContextProjectionState(): ContextProjectionState {
+/** The empty state of one Session whose log carries no continuity fact yet. */
+export function emptyContextProjectionState(target: ContextFoldTarget): ContextProjectionState {
   return {
+    sessionId: target.sessionId,
+    inheritedEventCount: target.inheritedEventCount ?? 0,
     checkpoints: [],
     pending: null,
     continuations: [],
@@ -246,7 +264,7 @@ function parseCheckpointName(raw: string): string | undefined {
 
 /** One pure transition plus everything it needs to name a fact. */
 function createStep(config: ContextProjectionConfig): (state: ContextProjectionState, event: SessionEvent) => ContextProjectionState {
-  const { sessionId, codec, host } = config
+  const { codec, host } = config
   const rolloverToolNames = config.rolloverToolNames ?? [CONTEXT_ROLLOVER_TOOL_NAME]
   const checkpointToolName = config.checkpointToolName ?? CONTEXT_CHECKPOINT_TOOL_NAME
 
@@ -321,7 +339,7 @@ function createStep(config: ContextProjectionConfig): (state: ContextProjectionS
       const name = parseCheckpointName(recorded.arguments)
       if (name === undefined) return { ...state, openCalls }
       const entry: ContextCheckpointEntry = {
-        checkpointRef: host.checkpointRefFor(sessionId, block.toolCallId),
+        checkpointRef: host.checkpointRefFor(state.sessionId, block.toolCallId),
         name,
         resultSeq: seq,
         turn,
@@ -330,7 +348,7 @@ function createStep(config: ContextProjectionConfig): (state: ContextProjectionS
       return { ...state, openCalls, checkpoints: [...state.checkpoints, entry] }
     }
     const contribution = boundaryOf({
-      sessionId,
+      sessionId: state.sessionId,
       seq,
       turn,
       seenTopics: state.seenTopics,
@@ -382,7 +400,7 @@ function createStep(config: ContextProjectionConfig): (state: ContextProjectionS
       }
     }
     const contribution = boundaryOf({
-      sessionId,
+      sessionId: state.sessionId,
       seq: event.seq,
       turn: next.lastTurn,
       seenTopics: next.seenTopics,
@@ -448,6 +466,11 @@ function createStep(config: ContextProjectionConfig): (state: ContextProjectionS
   }
 
   return (state, event) => {
+    // A seeded Session's log opens with the ancestor generation's events. They
+    // are that generation's facts — folding them here would key its checkpoints
+    // to this Session and arm its rollover intent as this one's pending swap —
+    // so everything below the cut returns the same state reference.
+    if (event.seq < state.inheritedEventCount) return state
     switch (event.type) {
       case 'tool/call': {
         const { name, arguments: raw } = event.data
@@ -475,25 +498,31 @@ function createStep(config: ContextProjectionConfig): (state: ContextProjectionS
 
 /**
  * Cold-fold one immutable event log into its continuity state, with exactly the
- * transition the live unit uses.
+ * transition the live unit uses. The target names the Session the log belongs
+ * to and, for a seeded generation, how much of its opening is the ancestor's.
  */
 export function foldContextProjection(
   events: readonly SessionEvent[],
   config: ContextProjectionConfig,
+  target: ContextFoldTarget,
 ): ContextProjectionState {
   const step = createStep(config)
-  let state = emptyContextProjectionState()
+  let state = emptyContextProjectionState(target)
   for (const event of events) state = step(state, event)
   return state
 }
 
 /**
- * The host-only projection unit of one Session. No wire view is published: the
- * state is read through `ctx.sessionProjections.stateOf(session, key)`, and the
- * derived client surface (timeline candidates) belongs to a later increment.
+ * The host-only projection unit for one subject's Sessions. No wire view is
+ * published: the state is read through `ctx.sessionProjections.stateOf(session,
+ * key)`, and the derived client surface (timeline candidates) belongs to a
+ * later increment.
  *
- * The definition is a factory because each Session folds with its own identity:
- * checkpoint and boundary refs derive from that Session's exact log.
+ * Register it **once per host**: the framework keeps one unit per projection
+ * key and drives it for every Session, so the definition closes over no Session
+ * identity. `init` records the header's id and its fork-inherited prefix length
+ * in the state, which is what keys every ref to the right generation and keeps
+ * a seeded successor from adopting its ancestor's facts.
  */
 export function createContextProjectionDefinition(
   config: ContextProjectionConfig,
@@ -501,13 +530,13 @@ export function createContextProjectionDefinition(
   const step = createStep(config)
   return {
     key: CONTEXT_CONTINUITY_PROJECTION_KEY,
-    // v1: the engine's own state shape, first published with the extraction.
-    stateVersion: 1,
+    // v2: the state carries the Session identity it folds and the fork-inherited
+    // cut, so one registration serves every Session. A v1 row carries neither
+    // and is discarded by `stateSchema` instead of being folded onward.
+    stateVersion: 2,
     stateSchema: contextProjectionStateSchema,
-    // A seeded or forked Session carries its inherited prefix *in its own log*,
-    // so the framework folds those events like any other and no prefix
-    // bookkeeping belongs here.
-    init: (_header: SessionHeader, _inheritedEventCount: SessionLogOffset): ContextProjectionState => emptyContextProjectionState(),
+    init: (header: SessionHeader, inheritedEventCount: SessionLogOffset): ContextProjectionState =>
+      emptyContextProjectionState({ sessionId: header.id, inheritedEventCount: Number(inheritedEventCount) }),
     apply: (state, event) => step(state, event),
   }
 }

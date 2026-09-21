@@ -15,6 +15,7 @@ import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { ContextContinuityCoordinator } from '../src/coordinator.ts'
 import type { ContextContinuityHost } from '../src/host.ts'
 import { ContextMessageCodec } from '../src/message-codec.ts'
+import { emptyContextProjectionState } from '../src/projection.ts'
 import type {
   ContextCheckpointEntry,
   ContextProjectionState,
@@ -75,15 +76,7 @@ class FakeAgent {
 
 function state(overrides: Partial<ContextProjectionState> = {}): ContextProjectionState {
   return {
-    checkpoints: [],
-    pending: null,
-    continuations: [],
-    carriedCandidates: [],
-    lastTurn: 0,
-    openCalls: [],
-    boundaries: [],
-    seenTopics: [],
-    lastTurnEndSeq: -1,
+    ...emptyContextProjectionState({ sessionId: SESSION }),
     ...overrides,
   }
 }

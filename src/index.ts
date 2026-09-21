@@ -42,6 +42,7 @@ export {
   createContextProjectionDefinition,
 } from './projection.ts'
 export type {
+  ContextFoldTarget,
   ContextProjectionConfig,
   ContextProjectionHost,
   DomainBoundaryContribution,
