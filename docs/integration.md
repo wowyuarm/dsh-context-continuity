@@ -25,6 +25,7 @@ exactly that, through the seams below.
 | Message codec | shipped |
 | Projection (`ContextProjectionHost` + fold unit) | shipped |
 | Coordinator (`ContextContinuityHost`) | shipped |
+| Timeline read (`readContextTimeline`) | shipped |
 | Tools factory (`createContinuityTools`) | planned |
 | Search scope (`SearchScopeProvider`) | planned |
 
@@ -203,7 +204,51 @@ generation recoverable** (never half-swap).
 > request-id scheme is what makes an interrupted rollover converge on one
 > operation across restart. Changing the scheme risks a duplicate successor.
 
-## Seam 5 — tools factory (planned)
+## Seam 5 — timeline read (shipped)
+
+`readContextTimeline` walks the subject's lineage — the current generation, then
+archived ancestors through your stored-Session reader — and returns the bounded,
+priced list of return anchors behind `context_timeline`. The engine owns the
+walk, the dedupe, the pricing, and the shared restorable-anchor rule; you supply
+the mechanism it cannot have as a pure library.
+
+```ts
+import { readContextTimeline } from '@wowyuarm/dsh-context-continuity'
+
+const timeline = await readContextTimeline({
+  current: {
+    sessionId: agent.session.id,
+    header: agent.session.header,
+    inheritedEventCount: agent.session.inheritedEventCount,
+    events: agent.session.snapshotEvents(),      // the cut is handled by the fold
+  },
+  config,                                        // the same fold config as seam 3
+  readAncestor: id => sessionReader.read(id),    // your StoredSessionReader
+  measureSource: source => source.sessionId === agent.session.id
+    ? meter?.measure(agent.session)?.totalTokens
+    : measureStoredLog(source),                  // your own replay of the ancestor
+  currentUsageTokens: meter?.measure(agent.session)?.totalTokens ?? 0,
+  handoffAt,                                     // from your route limits
+})
+```
+
+- **The engine prices; you measure.** A pure library has no `tokenMeter` on
+  `ctx`, so measurement arrives as `measureSource` — the *source's own* replayed
+  token count, so a small current generation never shrinks a large ancestor's
+  real seed cost. `undefined` means unmeasurable: those anchors stay listed with
+  a reason instead of being priced as free.
+- **Anchors are structural.** Resolved checkpoints, resolved host boundaries
+  (your `domainBoundaryOf` contributions), and the current head. An unresolved
+  anchor is not a candidate, and an archived generation contributes no head.
+- **The restorable rule is the one `context_rollover` uses:** a boundary is
+  selectable exactly when it resolved at a completed turn and is attributable to
+  exactly one topic; a checkpoint while its retained context stays below
+  `handoffAt`. Every non-restorable anchor carries its reason.
+- **An unreadable ancestor ends the walk and is reported** in `incompleteFrom`:
+  history is then complete through the last listed generation, and never
+  silently short.
+
+## Seam 6 — tools factory (planned)
 
 The product surface. A factory produces the three model-facing tools from your
 adapter plus optional prose overrides; the engine keeps the safety-bearing
@@ -227,7 +272,7 @@ related-files-shape / anti-forgery-`checkpointRef` validation, and the
 "a context change never rolls back an external effect" discipline. You override
 subject-facing wording only.
 
-## Seam 6 — search scope (planned)
+## Seam 7 — search scope (planned)
 
 Search recalls across sessions, and **the engine never knows what a workspace or
 a team is** — it knows a subject and a set of sessions you authorize.

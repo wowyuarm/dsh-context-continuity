@@ -16,9 +16,10 @@ the engine to its own subject and its own domain through one contract.
 
 ## Status
 
-The engine core — including the projection unit — is extracted and covered by
-unit tests; no host consumes it yet. Team integration is a separate, later step
-(`dsh-agent-team` still carries its own copy of this mechanism).
+The engine core — the projection unit, the coordinator, and the lineage read —
+is extracted and covered by unit tests; no host consumes it yet. Team integration
+is a separate, later step (`dsh-agent-team` still carries its own copy of this
+mechanism); the model-facing tools factory is the next increment here.
 
 ## Layout
 
@@ -27,7 +28,8 @@ unit tests; no host consumes it yet. Team integration is a separate, later step
 | `src/host.ts` | `ContextContinuityHost<SubjectId>` — everything the engine asks a host for, plus the one shared ephemeral-notice rule |
 | `src/types.ts` | Subject, transition plan, rollover identity, trigger vocabulary |
 | `src/projection-state.ts` | The read-only state one Session folds from its durable log, plus the host-contributed `DomainBoundary` anchor |
-| `src/projection.ts` | The fold itself, as the Harness `ProjectionDefinition` `contextContinuity`: one pure transition over committed events |
+| `src/projection.ts` | The fold itself, as the Harness `ProjectionDefinition` `contextContinuity`: one pure transition over committed events, one registration for every Session |
+| `src/timeline.ts` | The lineage read: a subject's generations walked, deduplicated, and priced into one bounded list of return anchors |
 | `src/message-codec.ts` | Durable handoff and checkpoint-continuation messages, written and read through the shipped `plugin` snapshot form |
 | `src/coordinator.ts` | Rollover lifecycle: durable-result gate, turn-end and idle boundary, the swap, carried input, checkpoint continuations, crash recovery |
 | `src/stored-session-reader.ts` | One read seam for stored Sessions with five typed failure categories |
@@ -40,6 +42,8 @@ A host supplies only what the engine cannot know:
 - read one Session's continuity state (`ContextProjectionState`) for the
   coordinator — folding it by hand, or by registering the engine's own
   projection unit and reading it back;
+- read an archived ancestor's stored log and measure one source's tokens, which
+  is all `readContextTimeline` (the lineage walk) needs from you;
 - contribute whatever its domain treats as a timeline anchor, and name its
   durable refs (`ContextProjectionHost`: `checkpointRefFor`, `boundaryRefFor`,
   `tracksCall`, `domainBoundaryOf`);

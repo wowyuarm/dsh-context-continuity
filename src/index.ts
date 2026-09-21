@@ -52,6 +52,19 @@ export type {
 export { ContextContinuityCoordinator } from './coordinator.ts'
 
 export {
+  DEFAULT_TIMELINE_ANCESTORS,
+  DEFAULT_TIMELINE_LIMIT,
+  readContextTimeline,
+} from './timeline.ts'
+export type {
+  ContextTimeline,
+  ContextTimelineItem,
+  ContextTimelineRequest,
+  ContextTimelineSource,
+  ContextTimelineSourceKind,
+} from './timeline.ts'
+
+export {
   ContextMessageCodec,
   HANDOFF_SECTION_NAME,
   CHECKPOINT_SECTION_NAME,
