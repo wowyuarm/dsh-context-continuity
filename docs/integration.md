@@ -9,16 +9,13 @@ single subject.
 The engine owns the universal mechanics — the idle-boundary generation swap,
 the admission gate, carried input, checkpoint continuations, the projection
 fold, the lineage walk, the shared return-anchor policy, the model-facing tools
-with their validation, and the bounded retrieval ladder. It knows nothing about
-what your subject is or what your domain treats as meaningful. You supply
-exactly that, through the seams below.
+with their validation, the bounded retrieval ladder, and the pressure policy. It
+knows nothing about what your subject is or what your domain treats as
+meaningful. You supply exactly that, through the seams below.
 
-## Status legend
+## Seams
 
-| Mark | Meaning |
-| --- | --- |
-| **shipped** | Implemented and unit-tested in this package. |
-| **planned** | Designed (see the Team-side `DESIGN.md`), not yet in this package. |
+Every seam below is **shipped**: implemented and unit-tested in this package.
 
 | Seam | Status |
 | --- | --- |
@@ -29,6 +26,7 @@ exactly that, through the seams below.
 | Timeline read (`readContextTimeline`) | shipped |
 | Tools factory (`createContinuityTools`) | shipped |
 | Retrieval ladder (`createSearchTools`, `SearchScopeProvider`) | shipped |
+| Pressure policy (`ContextPressurePolicy`) | shipped |
 
 Everything a host reaches for is exported from the package root
 (`@wowyuarm/dsh-context-continuity`).
@@ -369,6 +367,67 @@ const tools = createSearchTools({
   sanitized sentence; a bad ref, an unoffered scope, a time bound without a
   timezone, and a stale seq each say what was wrong and what to do instead.
 
+## Seam 8 — context pressure (shipped)
+
+`ContextPressurePolicy` decides when a subject is told to prepare a handoff, and
+what happens when it is at its limit. The engine owns the decision order, the
+once-per-generation latch, and the proof a reduction has to earn; you own the
+meter, the reduction capability, the steer, and what the notice calls whatever
+the subject is holding.
+
+```ts
+import { ContextPressurePolicy } from '@wowyuarm/dsh-context-continuity'
+
+const pressure = new ContextPressurePolicy<MemberId>({
+  pluginId: AGENT_TEAM_PLUGIN_ID,               // whose notice this is, on read-back
+  limitsFor: member => routeLimitsForMember(member),   // meter + route window + reserves
+  surfaceFor: member => ({
+    generation: surfaceReplaceGenerationOf(member),
+    tokens: meterOf(member)?.measure(sessionOf(member))?.totalTokens,
+  }),
+  compactionFor: member => compactionServiceOf(member),  // { reduce(reason, signal) }
+  logSpanFor: member => ({
+    sessionId: String(sessionOf(member).id),
+    inheritedEventCount: Number(sessionOf(member).inheritedEventCount),
+    events: sessionOf(member).snapshotEvents(),
+  }),
+  inHandFor: member => ({ inHand: activeClaimLabels(member), jobs: runningJobLabels(member) }),
+  steer: (member, notice) => sessionOf(member).steer(notice),
+  failedFor: (member, diagnostic) => setMemberFailure(member, 'compaction', diagnostic),
+  log: (message, member) => ctx.logger.warn(`agent-team: ${message} (member ${member})`),
+}, { inHandLabel: 'Active Claims', jobsLabel: 'Owner jobs' })
+
+const decision = await pressure.onPreStep(member, signal)   // continue | notice | reject
+```
+
+- **Two thresholds, one order.** Below the handoff budget nothing happens; at it
+  one notice is steered into the running turn; at the hard limit the request is
+  forced through a reduction first. A request at the hard limit is never merely
+  noticed.
+- **The notice is durable evidence, not process state.** The latch reads the
+  subject's own log span for a `user/message` carrying `source.summary ===
+  PRESSURE_NOTICE_SUMMARY`, or a durable `agent/inbox/spliced` insert of one, so
+  a restart stays quiet and a fresh generation re-arms by itself. A steered
+  notice you do not record in the log is delivered again — the latch reads the
+  log, not your memory. An inherited notice belongs to the generation it came
+  from and does not latch this one.
+- **A reduction must be proven.** The engine reads `surfaceFor` before and after
+  and continues only when the durable generation advanced or pressure measurably
+  fell (`tokens`, when you meter); otherwise the step is refused with a
+  recoverable diagnostic — a no-op, a throw, or an unavailable capability all
+  block rather than submit over the limit. Background jobs are never touched.
+- **Missing capacity is a refusal, not an unbounded policy.** An unresolvable
+  route window rejects the step and says so.
+- **Provider overflow gets one bounded retry.** On the context-window-exceeded
+  failure code the policy reduces once and allows a single retry for that open
+  sequence; a durable surface change is required for the retry to count, and a
+  successful assistant response re-arms the sequence. The retry budget is
+  process-only and per subject.
+- **The notice's substance is the engine's.** The measured numbers, the default
+  action (`context_rollover` by default, renameable), and the instruction to
+  record durable knowledge before switching are not knobs; `PressureNoticeText`
+  replaces only the two labels and the tool name.
+
 ## Compatibility red lines (durable identity)
 
 These are written into logs by earlier generations and read back by later ones.
@@ -386,3 +445,6 @@ Once a host ships, treat them as frozen:
 6. The `contextRef` prefix (`context-hit-`) — a conversation reads its own refs
    back, so a new payload format arrives under a new prefix; an old ref then
    rejects as a model-visible error instead of decoding into the wrong event.
+7. The pressure notice's `source.summary` (`PRESSURE_NOTICE_SUMMARY`) — the
+   latch reads notices back out of live logs to decide whether the current
+   generation was already told, so a notice already written must keep matching.

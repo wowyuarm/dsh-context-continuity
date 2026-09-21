@@ -17,10 +17,10 @@ the engine to its own subject and its own domain through one contract.
 ## Status
 
 The engine core — the projection unit, the coordinator, the lineage read, the
-model-facing tools factory, and the retrieval ladder — is extracted and covered
-by unit tests; no host consumes it yet. Team integration is a separate, later
-step (`dsh-agent-team` still carries its own copy of this mechanism); the
-pressure policy is the next increment here.
+model-facing tools factory, the retrieval ladder, and the context-pressure
+policy — is extracted and covered by unit tests; no host consumes it yet. Team
+integration is a separate, later step (`dsh-agent-team` still carries its own
+copy of this mechanism).
 
 ## Layout
 
@@ -35,6 +35,7 @@ pressure policy is the next increment here.
 | `src/search.ts` | The retrieval engine: authorization, provenance folding, the bounded search, and the neighbourhood read a `contextRef` expands into |
 | `src/search-tools.ts` | `context_search` and `context_read` — the model-facing ladder, with its descriptions, argument rules, output schemas, and renders |
 | `src/context-ref.ts` | The opaque canonical `contextRef` codec: `(sessionId, seq)` of the generation that recorded the event, and nothing else |
+| `src/pressure.ts` | The context-pressure policy: the two thresholds, the once-per-generation handoff notice, and the fail-closed reduction proof at the hard limit |
 | `src/tools.ts` | The three model-facing tools — `context_rollover`, `context_checkpoint`, `context_timeline` — as one factory over a host adapter |
 | `src/message-codec.ts` | Durable handoff and checkpoint-continuation messages, written and read through the shipped `plugin` snapshot form |
 | `src/coordinator.ts` | Rollover lifecycle: durable-result gate, turn-end and idle boundary, the swap, carried input, checkpoint continuations, crash recovery |
@@ -61,6 +62,10 @@ A host supplies only what the engine cannot know:
 - contribute whatever its domain treats as a timeline anchor, and name its
   durable refs (`ContextProjectionHost`: `checkpointRefFor`, `boundaryRefFor`,
   `tracksCall`, `domainBoundaryOf`);
+- meter pressure and reduce it: the effective budgets of one subject's route, a
+  monotone surface observation, the reduction capability, the steer, and the
+  labels for whatever that subject is holding — the engine decides when, and
+  refuses to continue on a reduction it cannot prove;
 - perform one prepared generation swap in its own lifecycle;
 - derive the durable, collision-resistant identity of one rollover
   (`RolloverIdentity`) — a Session-id scheme is a host concern, not the engine's;
@@ -105,6 +110,16 @@ A host supplies only what the engine cannot know:
    the host's adapter performs every effect, and the overridable prose is
    subject-facing vocabulary only. A fabricated ref is a model-visible error
    rather than a silent fresh rollover, in every host, by construction.
+
+7. **Pressure is a policy, not a threshold.** `ContextPressurePolicy` owns the
+   order of the two limits, the once-per-generation notice latch, and the proof a
+   reduction must earn before a request may continue — the durable surface
+   advanced, or pressure measurably fell, or the request is blocked with a
+   recoverable diagnostic rather than knowingly submitted over the limit. The
+   latch reads durable Session evidence, never process state: a restart stays
+   quiet, a rollover re-arms, and a failed steer is retried. The host owns the
+   meter, the reduction capability, the steer, and the words the notice uses for
+   what the subject is holding.
 
 ## Development
 

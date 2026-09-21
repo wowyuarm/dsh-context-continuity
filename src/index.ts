@@ -4,10 +4,11 @@
  *
  * A subject rolls forward into a fresh generation (`context_rollover`), returns
  * to a recorded anchor (`context_checkpoint` + rollover), walks its own lineage
- * as one timeline (`context_timeline`), and recalls what it has forgotten
- * (`context_search` + `context_read`) — physically many Session files, one
- * continuous context in the subject's understanding. The engine owns these
- * mechanics generically; a host binds them to its own subject and domain
+ * as one timeline (`context_timeline`), recalls what it has forgotten
+ * (`context_search` + `context_read`), and is told to prepare a handoff before
+ * its context runs out (the context-pressure policy) — physically many Session
+ * files, one continuous context in the subject's understanding. The engine owns
+ * these mechanics generically; a host binds them to its own subject and domain
  * through {@link ContextContinuityHost} and {@link ContextSearchAdapter}.
  * @module @wowyuarm/dsh-context-continuity
  */
@@ -136,3 +137,19 @@ export type {
   StoredSessionInspection,
   StoredSessionReadResult,
 } from './stored-session-reader.ts'
+
+export {
+  PRESSURE_NOTICE_SUMMARY,
+  ContextPressurePolicy,
+  contextPressureNoticeText,
+} from './pressure.ts'
+export type {
+  PressureCompaction,
+  PressureInHand,
+  PressureLimits,
+  PressureLogSpan,
+  PressureNoticeText,
+  PressurePolicyHost,
+  PressureStepDecision,
+  PressureSurface,
+} from './pressure.ts'
