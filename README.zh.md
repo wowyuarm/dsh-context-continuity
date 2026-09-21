@@ -14,30 +14,40 @@
 它手头在做的事、刚想明白的东西，一下子被挡在了墙的另一边。
 
 这个插件给 agent 几件工具，让它自己翻过这堵墙：Session 快满时，它写一段简短的交接，然后在
-新 Session 里作为同一个 agent 接着干；它可以标记一个位置方便以后回来；还能回头搜自己早先的
-Session，把当时说过、做过的事翻出来。任何跑得够久、会把 Session 写满的 agent 都能用——
+新 Session 里作为同一个 agent 接着干；它可以标记一个位置方便以后回来；挂上可选的检索工具
+之后，它还能回头搜自己早先的 Session，把当时说过、做过的事翻出来。任何跑得够久、会把
+Session 写满的 agent 都能用——
 [Loom](https://github.com/wowyuarm/Loom) 的 individual、[Agent Team](https://github.com/wowyuarm/dsh-agent-team)
 的 member、跑长任务的 coding agent。
 
 ## agent 能用到什么
 
-五个它能调用的工具，外加一层自动兜底：
+三个它能调用的工具，外加一层自动兜底——这些开箱即用，所以每个接入本插件的插件，都给自己
+的 agent 提供同一套：
 
 - **`context_rollover`** —— 开一个新 Session，但还是同一个 agent，把你写的交接带进新 Session。
 - **`context_checkpoint`** —— 标记当前位置，方便以后回到这里。
 - **`context_timeline`** —— 回看自己的历史，挑一个能安全返回的位置。
-- **`context_search`** —— 在自己早先的 Session 里搜某件说过或做过的事。
-- **`context_read`** —— 打开一条搜索结果，读它周围的上下文。
 - **压力兜底** —— Session 快满时提前提醒，到上限时给一个安全退路，agent 不会被迫在糟糕的
   时机切换。
 
-这些工具开箱即用，所以每个接入本插件的插件，都给自己的 agent 提供同一套工具。
+另外两个是**可选的**——只有你自己挂载 `createSearchTools`，agent 才会拿到：
+
+- **`context_search`** —— 在自己早先的 Session 里搜某件说过或做过的事。
+- **`context_read`** —— 打开一条搜索结果，读它周围的上下文。
+
+它们单独分开，是因为对你的接入要求比核心那几个更高：你要提供一个 `session-query` port
+——也就是它们据以定型的已发布 `@deepseek-ai/dsh-session-query` 契约，本包为它声明了 peer
+——还要给出每个主体可以搜哪些历史 Session。部署侧也得配合：这条检索阶梯读的是 Harness 的
+Session 索引，所以把索引关着的部署只会 fail closed，而不是返回结果。接线见
+[`docs/integration.md`](docs/integration.md) 的 seam 7。
 
 ## 状态
 
 已完成、已测试。[`dsh-agent-team`](https://github.com/wowyuarm/dsh-agent-team) 已经在正式
 使用——它的 member 的 rollover、checkpoint、timeline 和压力处理都换成了本插件，并删掉了自己
-原来那份实现。如果你要把它接进自己的插件，它的接入代码
+原来那份实现。它只挂核心那几个，没有挂可选的检索对——这是个合理的默认：只有当部署真的跑起
+Session 索引时，那一对才值得加。如果你要把它接进自己的插件，它的接入代码
 （`packages/agent-team/src/context-continuity-host.ts`）就是可以照抄的范例。
 
 ## 它怎么工作
@@ -49,8 +59,9 @@ Harness 本身已经会 fork Session、从旧 Session 开一个新的、把 Sess
 
 ## 在你的插件里用它
 
-你告诉它你的 agent 是谁、允许搜哪些历史 Session、以及在你自己的环境里怎么执行一次 Session
-切换，剩下的它来做。带代码的分步接入指南见 [`docs/integration.md`](docs/integration.md)。
+你告诉它你的 agent 是谁、以及在你自己的环境里怎么执行一次 Session 切换——如果你还挂了检索
+工具，再告诉它允许搜哪些历史 Session，剩下的它来做。带代码的分步接入指南见
+[`docs/integration.md`](docs/integration.md)。
 
 ## 开发
 

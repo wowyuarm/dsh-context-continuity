@@ -16,37 +16,50 @@ figured out, is now on the other side of a wall.
 
 This plugin gives an agent the tools to carry itself across that wall on its own:
 when a Session is getting full, it writes a quick handoff and keeps going in a
-fresh one as the same agent; it can mark a spot to come back to; and it can search
-back through its earlier Sessions and pull out what it said or did. Any agent that
-runs long enough to fill a Session can use it — a
+fresh one as the same agent; it can mark a spot to come back to; and — with the
+optional search tools mounted — it can search back through its earlier Sessions and
+pull out what it said or did. Any agent that runs long enough to fill a Session can
+use it — a
 [Loom](https://github.com/wowyuarm/Loom) individual, an
 [Agent Team](https://github.com/wowyuarm/dsh-agent-team) member, a coding agent on
 a long task.
 
 ## What the agent gets
 
-Five tools it can call, plus one automatic safeguard:
+Three tools it can call, plus one automatic safeguard — these ship ready to use, so
+every plugin that adopts this gives its agents the same set:
 
 - **`context_rollover`** — start a fresh Session but stay the same agent, carrying
   a handoff you write into the new one.
 - **`context_checkpoint`** — mark the current spot so you can come back to it.
 - **`context_timeline`** — look back over your own history and pick a spot that's
   safe to return to.
-- **`context_search`** — search your earlier Sessions for something you said or did.
-- **`context_read`** — open one search result and read around it.
 - **pressure handling** — a heads-up when a Session is filling up, and a safe
   fallback at the limit, so the agent is never forced to switch at a bad moment.
 
-They ship ready to use, so every plugin that adopts this gives its agents the same
-set of tools.
+Two more are **opt-in** — the agent only gets them if you mount `createSearchTools`
+yourself:
+
+- **`context_search`** — search your earlier Sessions for something you said or did.
+- **`context_read`** — open one search result and read around it.
+
+They are kept separate because they ask more of your setup than the core does. You
+supply a `session-query` port — the published `@deepseek-ai/dsh-session-query`
+contract they are typed against, and the peer this package declares for it — plus
+which past Sessions each subject is allowed to search. The deployment has to hold up
+its end too: the ladder reads the Harness Session index, so a deployment that leaves
+that index closed fails closed instead of returning results. The wiring is seam 7 of
+[`docs/integration.md`](docs/integration.md).
 
 ## Status
 
 Ready and tested. [`dsh-agent-team`](https://github.com/wowyuarm/dsh-agent-team)
 already uses it in production — for its members' rollovers, checkpoints, timeline,
-and pressure handling — and dropped its own version. If you're wiring this into
-your own plugin, its adapter (`packages/agent-team/src/context-continuity-host.ts`)
-is the example to copy.
+and pressure handling — and dropped its own version. It mounts the core and not the
+optional retrieval pair, which is a fair default: that pair is worth adding only when
+the deployment really runs the Session index. If you're wiring this into your own
+plugin, its adapter (`packages/agent-team/src/context-continuity-host.ts`) is the
+example to copy.
 
 ## How it works
 
@@ -60,9 +73,10 @@ reasoning is in [`docs/principles.md`](docs/principles.md).
 
 ## Using it in your plugin
 
-You tell it who your agent is, which past Sessions it's allowed to search, and how
-to run a Session switch in your own setup. It does the rest. The step-by-step
-guide, with code, is [`docs/integration.md`](docs/integration.md).
+You tell it who your agent is and how to run a Session switch in your own setup —
+plus, if you mount the search tools, which past Sessions each subject is allowed to
+search. It does the rest. The step-by-step guide, with code, is
+[`docs/integration.md`](docs/integration.md).
 
 ## Development
 
