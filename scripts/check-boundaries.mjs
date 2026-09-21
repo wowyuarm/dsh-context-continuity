@@ -23,6 +23,8 @@ const ALLOWED_PACKAGES = new Set([
   '@deepseek-ai/dsh-llm',
   '@deepseek-ai/dsh-session',
   '@deepseek-ai/dsh-session-persistence',
+  '@deepseek-ai/dsh-session-projection',
+  'zod',
 ])
 
 /** `... from '<spec>'` — named, default, and `import type` statements alike. */

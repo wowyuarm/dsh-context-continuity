@@ -21,6 +21,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContextContinuityHost } from './host.ts'
+import { isDroppedNotice } from './host.ts'
 import type { ContextMessageCodec } from './message-codec.ts'
 import { continuationDelivered, type ContextCheckpointEntry, type ContextProjectionState, type PendingRolloverIntent } from './projection-state.ts'
 import type { TransitionPlan } from './types.ts'
@@ -151,7 +152,7 @@ export class ContextContinuityCoordinator<SubjectId> {
     if (this.subjects.get(id)?.agent !== agent) return []
     const preserved: UserMessage[] = []
     for (const message of messages) {
-      if (this.isEphemeralNotice(message)) continue
+      if (isDroppedNotice(this.codec, this.host, message)) continue
       preserved.push(message)
     }
     if (preserved.length > 0) this.capturedInput.set(id, [...(this.capturedInput.get(id) ?? []), ...preserved])
@@ -163,18 +164,6 @@ export class ContextContinuityCoordinator<SubjectId> {
     const captured = this.capturedInput.get(id) ?? []
     this.capturedInput.delete(id)
     return captured
-  }
-
-  /**
-   * Whether one queued message is an ephemeral notice the successor generation
-   * replaces. The codec's own handoff and continuation envelopes carry the
-   * host plugin attribution but are ordinary delivered context the new
-   * generation keeps, so they are excluded rather than dropped; everything else
-   * defers to the host's domain judgement.
-   */
-  private isEphemeralNotice(message: UserMessage): boolean {
-    if (this.codec.isContextSource(message)) return false
-    return this.host.isEphemeralNotice(message)
   }
 
   /** Drop one subject's bookkeeping; the host calls this on dispose/removal. */

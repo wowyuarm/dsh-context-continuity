@@ -30,6 +30,23 @@ export type {
 export { continuationDelivered } from './projection-state.ts'
 
 export type { SubjectResolver, ContextContinuityHost } from './host.ts'
+export { isDroppedNotice } from './host.ts'
+
+export {
+  CONTEXT_CONTINUITY_PROJECTION_KEY,
+  CONTEXT_CHECKPOINT_TOOL_NAME,
+  CONTEXT_ROLLOVER_TOOL_NAME,
+  contextProjectionStateSchema,
+  emptyContextProjectionState,
+  foldContextProjection,
+  createContextProjectionDefinition,
+} from './projection.ts'
+export type {
+  ContextProjectionConfig,
+  ContextProjectionHost,
+  DomainBoundaryContribution,
+  DomainBoundaryInput,
+} from './projection.ts'
 
 export { ContextContinuityCoordinator } from './coordinator.ts'
 

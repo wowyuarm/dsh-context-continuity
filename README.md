@@ -16,17 +16,18 @@ the engine to its own subject and its own domain through one contract.
 
 ## Status
 
-The engine core is extracted and covered by unit tests; no host consumes it yet.
-Team integration is a separate, later step (`dsh-agent-team` still carries its
-own copy of this mechanism).
+The engine core — including the projection unit — is extracted and covered by
+unit tests; no host consumes it yet. Team integration is a separate, later step
+(`dsh-agent-team` still carries its own copy of this mechanism).
 
 ## Layout
 
 | File | Responsibility |
 | --- | --- |
-| `src/host.ts` | `ContextContinuityHost<SubjectId>` — everything the engine asks a host for |
+| `src/host.ts` | `ContextContinuityHost<SubjectId>` — everything the engine asks a host for, plus the one shared ephemeral-notice rule |
 | `src/types.ts` | Subject, transition plan, rollover identity, trigger vocabulary |
 | `src/projection-state.ts` | The read-only state one Session folds from its durable log, plus the host-contributed `DomainBoundary` anchor |
+| `src/projection.ts` | The fold itself, as the Harness `ProjectionDefinition` `contextContinuity`: one pure transition over committed events |
 | `src/message-codec.ts` | Durable handoff and checkpoint-continuation messages, written and read through the shipped `plugin` snapshot form |
 | `src/coordinator.ts` | Rollover lifecycle: durable-result gate, turn-end and idle boundary, the swap, carried input, checkpoint continuations, crash recovery |
 | `src/stored-session-reader.ts` | One read seam for stored Sessions with five typed failure categories |
@@ -36,8 +37,12 @@ own copy of this mechanism).
 A host supplies only what the engine cannot know:
 
 - resolve a subject to its live Agent, and back;
-- fold one Session's projection (`ContextProjectionState`) from durable events, and
-  contribute whatever its domain treats as a timeline anchor (`DomainBoundary`);
+- read one Session's continuity state (`ContextProjectionState`) for the
+  coordinator — folding it by hand, or by registering the engine's own
+  projection unit and reading it back;
+- contribute whatever its domain treats as a timeline anchor, and name its
+  durable refs (`ContextProjectionHost`: `checkpointRefFor`, `boundaryRefFor`,
+  `tracksCall`, `domainBoundaryOf`);
 - perform one prepared generation swap in its own lifecycle;
 - derive the durable, collision-resistant identity of one rollover
   (`RolloverIdentity`) — a Session-id scheme is a host concern, not the engine's;
@@ -59,7 +64,12 @@ A host supplies only what the engine cannot know:
    history.
 4. **The coordinator is indifferent to how the fold is implemented.** It reads
    state through `host.projectionForSubject()`, so a host may fold by hand or
-   through the Harness projection framework.
+   through the Harness projection framework. The engine also *ships* that fold:
+   `createContextProjectionDefinition()` returns the host-only unit
+   `contextContinuity` (state version 1), and the framework owns the drive —
+   replay, incremental application, persistence, and invalidation. The fold
+   returns the same state reference for every event it does not care about, and
+   reads nothing outside the log: every durable ref is the host's answer.
 
 ## Development
 

@@ -22,6 +22,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContextSubject, RolloverIdentity, TransitionPlan } from './types.ts'
 import type { ContextProjectionState } from './projection-state.ts'
+import type { ContextMessageCodec } from './message-codec.ts'
 
 /** Resolve subjects and their live Agents in both directions. */
 export interface SubjectResolver<SubjectId> {
@@ -70,4 +71,22 @@ export interface ContextContinuityHost<SubjectId> extends SubjectResolver<Subjec
 
   /** Log one engine diagnostic. */
   log(message: string): void
+}
+
+/**
+ * Whether one queued message is an ephemeral domain notice the successor
+ * generation rederives, and so must be dropped rather than carried.
+ *
+ * The engine's own handoff and continuation envelopes carry the host's plugin
+ * attribution but are ordinary delivered context the successor keeps, so they
+ * are excluded before the host's domain judgement is consulted. Both the
+ * transition coordinator and the projection apply this one rule.
+ */
+export function isDroppedNotice(
+  codec: Pick<ContextMessageCodec, 'isContextSource'>,
+  host: Pick<ContextContinuityHost<never>, 'isEphemeralNotice'>,
+  message: UserMessage,
+): boolean {
+  if (codec.isContextSource(message)) return false
+  return host.isEphemeralNotice(message)
 }
