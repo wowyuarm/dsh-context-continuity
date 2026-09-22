@@ -51,16 +51,6 @@ its end too: the ladder reads the Harness Session index, so a deployment that le
 that index closed fails closed instead of returning results. The wiring is seam 7 of
 [`docs/integration.md`](docs/integration.md).
 
-## Status
-
-Ready and tested. [`dsh-agent-team`](https://github.com/wowyuarm/dsh-agent-team)
-already uses it in production — for its members' rollovers, checkpoints, timeline,
-and pressure handling — and dropped its own version. It mounts the core and not the
-optional retrieval pair, which is a fair default: that pair is worth adding only when
-the deployment really runs the Session index. If you're wiring this into your own
-plugin, its adapter (`packages/agent-team/src/context-continuity-host.ts`) is the
-example to copy.
-
 ## How it works
 
 The Harness already knows how to fork a Session, start a new one from an old one,

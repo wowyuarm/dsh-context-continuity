@@ -42,14 +42,6 @@ Session 写满的 agent 都能用——
 Session 索引，所以把索引关着的部署只会 fail closed，而不是返回结果。接线见
 [`docs/integration.md`](docs/integration.md) 的 seam 7。
 
-## 状态
-
-已完成、已测试。[`dsh-agent-team`](https://github.com/wowyuarm/dsh-agent-team) 已经在正式
-使用——它的 member 的 rollover、checkpoint、timeline 和压力处理都换成了本插件，并删掉了自己
-原来那份实现。它只挂核心那几个，没有挂可选的检索对——这是个合理的默认：只有当部署真的跑起
-Session 索引时，那一对才值得加。如果你要把它接进自己的插件，它的接入代码
-（`packages/agent-team/src/context-continuity-host.ts`）就是可以照抄的范例。
-
 ## 它怎么工作
 
 Harness 本身已经会 fork Session、从旧 Session 开一个新的、把 Session 日志当作唯一事实来源。
