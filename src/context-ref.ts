@@ -23,6 +23,15 @@ export interface ContextRefTarget {
 }
 
 /**
+ * One ref as prose may quote it: long enough to identify, never a payload dump.
+ * Used wherever a message repeats a ref that is not a selection surface — a
+ * rejection, or a timeline anchor the subject cannot return to.
+ */
+export function brief(ref: string): string {
+  return ref.length > 120 ? `${ref.slice(0, 120)}…` : ref
+}
+
+/**
  * The canonical ref for one remembered event. The payload is a base64url JSON
  * tuple, which round-trips across restarts and stays opaque to the model.
  */

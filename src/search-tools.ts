@@ -18,7 +18,7 @@
 
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools'
-import { parseContextRef } from './context-ref.ts'
+import { brief, parseContextRef } from './context-ref.ts'
 import {
   readContextHit,
   searchContext,
@@ -63,11 +63,6 @@ function readDescription(text: Required<SearchToolText>): string {
 function requireNonBlank(value: unknown, message: string): string {
   if (typeof value !== 'string' || value.trim() === '') throw new Error(message)
   return value
-}
-
-/** A ref as an error message may quote it: long enough to identify, never a payload dump. */
-function brief(ref: string): string {
-  return ref.length > 120 ? `${ref.slice(0, 120)}…` : ref
 }
 
 /**

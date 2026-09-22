@@ -228,6 +228,7 @@ const timeline = await readContextTimeline({
     : measureStoredLog(source),                  // your own replay of the ancestor
   currentUsageTokens: meter?.measure(agent.session)?.totalTokens ?? 0,
   handoffAt,                                     // from your route limits
+  hardLimit,                                     // optional: echoed back for display only
 })
 ```
 
@@ -242,7 +243,9 @@ const timeline = await readContextTimeline({
 - **The restorable rule is the one `context_rollover` uses:** a boundary is
   selectable exactly when it resolved at a completed turn and is attributable to
   exactly one topic; a checkpoint while its retained context stays below
-  `handoffAt`. Every non-restorable anchor carries its reason.
+  `handoffAt`. Every non-restorable anchor carries its reason, and quotes its
+  own identifier marked not selectable — a reader has to be able to name the row
+  it is being told it cannot return to.
 - **An unreadable ancestor ends the walk and is reported** in `incompleteFrom`:
   history is then complete through the last listed generation, and never
   silently short.

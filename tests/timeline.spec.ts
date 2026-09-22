@@ -236,6 +236,14 @@ describe('the current generation', () => {
     expect(timeline.incompleteFrom).toBeUndefined()
   })
 
+  it('echoes the host\'s hard limit when it supplies one, and omits it when it does not', async () => {
+    const bounded = await readContextTimeline(requestOf({ current: sourceOf(CURRENT, events), hardLimit: 500_000 }))
+    expect(bounded.hardLimit).toBe(500_000)
+
+    const unbounded = await readContextTimeline(requestOf({ current: sourceOf(CURRENT, events) }))
+    expect(Object.hasOwn(unbounded, 'hardLimit')).toBe(false)
+  })
+
   it('carries the topics that entered context by each anchor, and the host boundary kind verbatim', async () => {
     const timeline = await readContextTimeline(requestOf({ current: sourceOf(CURRENT, events) }))
     expect(timeline.items.map(item => item.affectedTopics)).toEqual([

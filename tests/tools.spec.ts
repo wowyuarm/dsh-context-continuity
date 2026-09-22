@@ -469,7 +469,7 @@ describe('renders: what the model reads', () => {
     expect(renderText(tools.timeline, value)).toBe([
       'Context timeline: 120000 tokens used (handoff at 100000). 2 item(s):',
       '- before the extraction [source: checkpoint] (retained ~40000, discarded ~80000; no topics) — restorable — ref: context-checkpoint:alpha',
-      '- the rollout Thread arrived [source: boundary — first-arrival] (retained ~90000, discarded ~30000; topics the rollout Thread) — not restorable — multiple topics entered the context by this boundary',
+      '- the rollout Thread arrived [source: boundary — first-arrival] (retained ~90000, discarded ~30000; topics the rollout Thread) — not restorable — multiple topics entered the context by this boundary (anchor: team-boundary:7 — not selectable)',
       'History incomplete: the lineage walk stopped at Session session-lost (the stored log could not be read); ancestors before it could not be read and are not reflected above.',
     ].join('\n'))
   })
@@ -482,6 +482,28 @@ describe('renders: what the model reads', () => {
     const text = renderText(tools.timeline, value)
     expect(text).toBe('Context timeline: 1 tokens used (handoff at 2). 0 item(s):')
     expect(text).not.toContain('History incomplete')
+  })
+
+  it('shows the hard limit beside the handoff budget when the host supplies one', async () => {
+    const spy = adapterSpy({ timeline: async () => ({ ...TIMELINE, hardLimit: 150_000 }) })
+    const tools = createContinuityTools(spy.adapter)
+    const { exec } = execution()
+    const value = await tools.timeline.execute({}, exec)
+    expect(renderText(tools.timeline, value).split('\n')[0])
+      .toBe('Context timeline: 120000 tokens used (handoff at 100000, hard limit 150000). 2 item(s):')
+    expect(outputViolations(tools.timeline, value)).toEqual([])
+  })
+
+  it('quotes a non-restorable anchor as an identifier that is not a citable ref', async () => {
+    const tools = createContinuityTools(adapterSpy().adapter)
+    const { exec } = execution()
+    const value = await tools.timeline.execute({}, exec)
+    const row = renderText(tools.timeline, value).split('\n').find(line => line.includes('not restorable')) ?? ''
+    // The row has to be nameable, and its shape has to keep saying the anchor is
+    // not a selection surface: the citable `ref:` form is for restorable rows.
+    expect(row).toContain('anchor: team-boundary:7')
+    expect(row).toContain('not selectable')
+    expect(row).not.toContain('ref:')
   })
 })
 

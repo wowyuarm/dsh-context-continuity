@@ -27,6 +27,7 @@
 
 import { defineTool, type ToolDefinition, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { brief } from './context-ref.ts'
 import type { ContextTimeline } from './timeline.ts'
 
 /** The handoff byte budget; larger handoffs are rejected before they reach the log. */
@@ -161,23 +162,27 @@ interface TimelineRenderItem {
 }
 
 /**
- * The timeline result, spelled the way the model must read it: a non-restorable
- * anchor states its reason, and a restorable one spells out the ref the rollover
- * call has to cite.
+ * The timeline result, spelled the way the model must read it: a restorable
+ * anchor spells out the ref the rollover call has to cite, and a non-restorable
+ * one states its reason and quotes its own anchor as an identifier that is
+ * explicitly not selectable — a reader has to be able to name the row it is
+ * being told it cannot return to.
  */
 function renderTimeline(value: {
   readonly usageTokens: number
   readonly handoffAt: number
+  readonly hardLimit?: number | undefined
   readonly items: readonly TimelineRenderItem[]
   readonly incompleteFrom?: { readonly sessionId: string; readonly reason: string } | undefined
 }): ContentBlock[] {
-  const lines = [`Context timeline: ${value.usageTokens} tokens used (handoff at ${value.handoffAt}). ${value.items.length} item(s):`]
+  const budget = value.hardLimit === undefined ? '' : `, hard limit ${value.hardLimit}`
+  const lines = [`Context timeline: ${value.usageTokens} tokens used (handoff at ${value.handoffAt}${budget}). ${value.items.length} item(s):`]
   for (const item of value.items) {
     const topics = item.affectedTopics.length === 0 ? 'no topics' : `topics ${item.affectedTopics.join(', ')}`
     const kind = item.kind === undefined ? '' : ` — ${item.kind}`
     const verdict = item.restorable
       ? `restorable — ref: ${item.ref}`
-      : `not restorable — ${item.reason ?? 'no reason given'}`
+      : `not restorable — ${item.reason ?? 'no reason given'} (anchor: ${brief(item.ref)} — not selectable)`
     lines.push(`- ${item.label} [source: ${item.source}${kind}] (retained ~${item.retainedTokens}, discarded ~${item.discardedTokens}; ${topics}) — ${verdict}`)
   }
   if (value.incompleteFrom !== undefined) {
@@ -271,6 +276,7 @@ export function createContinuityTools(adapter: ContinuityToolAdapter, text: Cont
       schema: { type: 'object', additionalProperties: false, properties: {
         usageTokens: { type: 'number', required: true },
         handoffAt: { type: 'number', required: true },
+        hardLimit: { type: 'number' },
         items: { type: 'array', required: true, items: { type: 'object', additionalProperties: false, properties: {
           ref: { type: 'string', required: true },
           label: { type: 'string', required: true },
@@ -301,6 +307,7 @@ export function createContinuityTools(adapter: ContinuityToolAdapter, text: Cont
       return {
         usageTokens: result.usageTokens,
         handoffAt: result.handoffAt,
+        ...(result.hardLimit === undefined ? {} : { hardLimit: result.hardLimit }),
         items: result.items.map(item => ({ ...item, affectedTopics: [...item.affectedTopics] })),
         ...(result.incompleteFrom === undefined ? {} : { incompleteFrom: result.incompleteFrom }),
       }

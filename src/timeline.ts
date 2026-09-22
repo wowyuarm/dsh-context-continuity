@@ -96,6 +96,12 @@ export interface ContextTimeline {
   readonly usageTokens: number
   /** The budget above which a retained context is no longer worth returning to. */
   readonly handoffAt: number
+  /**
+   * The subject's hard limit, echoed back for display. Like `handoffAt` it is
+   * the host's own number: the engine prices nothing against it and only lets a
+   * reader see where the handoff budget sits relative to the wall.
+   */
+  readonly hardLimit?: number
   /** Newest first, deduplicated across generations, truncated at the requested limit. */
   readonly items: readonly ContextTimelineItem[]
   /** The unreadable ancestor that ended the walk early, when one did. */
@@ -120,6 +126,11 @@ export interface ContextTimelineRequest {
   readonly currentUsageTokens: number
   /** The retained-context budget above which a return target stops being worth selecting. */
   readonly handoffAt: number
+  /**
+   * The subject's hard limit, echoed into {@link ContextTimeline.hardLimit} for
+   * display. Omit when the host has no such limit to show.
+   */
+  readonly hardLimit?: number
   /** How many items to return; defaults to {@link DEFAULT_TIMELINE_LIMIT}. */
   readonly limit?: number
   /** How many archived ancestors to follow; defaults to {@link DEFAULT_TIMELINE_ANCESTORS}. */
@@ -221,6 +232,7 @@ export async function readContextTimeline(request: ContextTimelineRequest): Prom
   return {
     usageTokens: request.currentUsageTokens,
     handoffAt: request.handoffAt,
+    ...(request.hardLimit === undefined ? {} : { hardLimit: request.hardLimit }),
     items,
     ...(incompleteFrom === undefined ? {} : { incompleteFrom }),
   }
