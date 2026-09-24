@@ -532,7 +532,9 @@ describe('text: a host rewords, it never weakens safety', () => {
     expect(tools.rollover.description).toContain('continue as the same Team Member in a new one')
     expect(tools.rollover.description).toContain('covering: the current objective, in your own words.')
     expect(tools.checkpoint.description).toContain('Record one before a broad refactor.')
-    expect(tools.timeline.description).not.toContain('Team Member')
+    // The timeline now speaks the host's subject vocabulary too; only the
+    // domain glossary (timelineGuidance) and the topic noun are separate knobs.
+    expect(tools.timeline.description).toContain("this Team Member's context lineage")
   })
 
   it('defaults to a domain-neutral vocabulary', () => {
@@ -545,6 +547,55 @@ describe('text: a host rewords, it never weakens safety', () => {
   it('keeps the declared parameter descriptions in the host vocabulary', () => {
     const tools = createContinuityTools(adapterSpy().adapter, CUSTOM)
     expect(JSON.stringify(tools.rollover.parameters)).toContain('the current objective, in your own words')
+  })
+})
+
+describe('text: the delta framing and the carried-context declaration', () => {
+  it('tells the model the handoff is what a fresh generation could not reconstruct', () => {
+    const tools = createContinuityTools(adapterSpy().adapter)
+    expect(tools.rollover.description).toContain('the live working state a fresh generation could not reconstruct on its own')
+    expect(tools.rollover.description).toContain('do not restate them')
+  })
+
+  it('defaults carried context to the one universal truth: the subject stays the same identity', () => {
+    const tools = createContinuityTools(adapterSpy().adapter)
+    expect(tools.rollover.description).toContain('You remain the same agent across a rollover')
+    const asMember = createContinuityTools(adapterSpy().adapter, { subjectNoun: 'Team Member' })
+    expect(asMember.rollover.description).toContain('You remain the same Team Member across a rollover')
+  })
+
+  it('lets a host name its own durable channels in place of the default', () => {
+    const carriedContext = 'Your @handle, role, private memory.md, and the Team ledger carry across a rollover — do not restate them.'
+    const tools = createContinuityTools(adapterSpy().adapter, { carriedContext })
+    expect(tools.rollover.description).toContain(carriedContext)
+    expect(tools.rollover.description).not.toContain('You remain the same agent across a rollover')
+  })
+})
+
+describe('text: the timeline vocabulary a domain-rich host needs', () => {
+  it('splices host timeline guidance while keeping the structural contract', () => {
+    const timelineGuidance = 'Team boundaries render as `Team message`, `Team task claim change`, or `First arrival: <refs>`.'
+    const tools = createContinuityTools(adapterSpy().adapter, { timelineGuidance })
+    expect(tools.timeline.description).toContain(timelineGuidance)
+    expect(tools.timeline.description).toContain('Structural only: no transcript content.')
+  })
+
+  it('names the attributable subject in the host vocabulary, in both the description and the render', async () => {
+    const spy = adapterSpy()
+    const tools = createContinuityTools(spy.adapter, { topicNoun: 'Thread', topicNounPlural: 'Threads' })
+    expect(tools.timeline.description).toContain('attributable to exactly one Thread')
+    expect(tools.timeline.description).toContain('the Threads whose facts entered your context')
+    const { exec } = execution()
+    const value = await tools.timeline.execute({}, exec)
+    const text = renderText(tools.timeline, value)
+    expect(text).toContain('no Threads')
+    expect(text).toContain('Threads the rollout Thread')
+    expect(text).not.toContain('no topics')
+  })
+
+  it('defaults the attributable-subject vocabulary to `topic`', () => {
+    const tools = createContinuityTools(adapterSpy().adapter)
+    expect(tools.timeline.description).toContain('attributable to exactly one topic')
   })
 })
 

@@ -172,7 +172,7 @@ export function contextPressureNoticeText(
   return [
     `Context pressure: ${input.usageTokens} tokens measured; the handoff budget is ${input.handoffAt} and the hard limit is ${input.hardLimit}.`,
     `${wording.inHandLabel}: ${inHand}. ${wording.jobsLabel}: ${jobs}.`,
-    `Finish the current atomic action, then call ${wording.rolloverToolName} with a handoff covering your objective, verified facts, and external side effects — a fresh context is the default path. Record anything durable in your private memory/notes first.`,
+    `Finish the current atomic action, then call ${wording.rolloverToolName} with a handoff covering your objective, the action in flight, and external side effects and their verification state — write only what a fresh generation could not reconstruct on its own, and a fresh context is the default path. Record anything durable in your private memory/notes first.`,
   ].join(' ')
 }
 

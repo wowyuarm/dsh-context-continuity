@@ -270,6 +270,14 @@ const tools = createContinuityTools({
   subjectNoun: 'Team Member',
   rolloverChecklist: '…what a handoff must cover in your domain…',
   checkpointGuidance: '…when to bury an anchor…',
+  // Name the durable channels a rollover carries, so the handoff is a delta,
+  // not a re-derivation of what a fresh generation already receives:
+  carriedContext: 'Your @handle, role, private memory.md, and the Team ledger carry across a rollover — do not restate them.',
+  // Domain glossary spliced into the timeline description, plus the word your
+  // boundaries are attributed to (the structural contract stays engine-owned):
+  timelineGuidance: 'Team boundaries render as `Team message`, `Team task claim change`, or `First arrival: <refs>`.',
+  topicNoun: 'Thread',
+  topicNounPlural: 'Threads',
 })
 // register tools.rollover / tools.checkpoint / tools.timeline
 ```
@@ -289,6 +297,20 @@ const tools = createContinuityTools({
   files each with a non-blank path and reason, and a blank `checkpointRef` that
   would otherwise read as absent. Either rejection is model-visible and touches
   no host state.
+- **The handoff is a delta, not a state dump.** The default rollover guidance
+  tells the model to write only the live working state a fresh generation could
+  not reconstruct on its own, and states the one universal carried fact — the
+  subject keeps its identity across the switch. `carriedContext` is where you
+  name your own durable channels (a memory file, a domain ledger, an injected
+  role) so the model does not re-derive what it already receives; a handoff that
+  restates identity, standing role, or facts already in those channels wastes the
+  very context it is meant to preserve.
+- **The timeline speaks your vocabulary.** `timelineGuidance` splices your
+  boundary glossary into the `context_timeline` description, and
+  `topicNoun`/`topicNounPlural` name what an anchor is attributed to (`Thread`
+  rather than `topic`) in both the description and the rendered rows. The
+  structural contract, the restorable rule, and "Structural only: no transcript
+  content" stay engine-owned.
 - **Names are fixed:** `context_rollover`, `context_checkpoint`,
   `context_timeline`. The prose you override refers to them by name, so only
   subject-facing vocabulary is yours: the anti-forgery sentence, "a context change
