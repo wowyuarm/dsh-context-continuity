@@ -1,13 +1,16 @@
 /**
  * The durable message codec for context continuity: handoff envelopes and
- * checkpoint continuations, written and read through the shipped `plugin`
- * snapshot form.
+ * checkpoint continuations, written and read under the producing host's own
+ * kind.
  *
- * Both messages ride ordinary `UserMessage`s under the `plugin` kind with the
- * `snapshot` context form — the same shape the Harness's own system-prompt
- * producer writes. Session format migration validates a `plugin` source
- * against a closed member list and refuses anything else, so everything a host
- * reads back rides named {@link ContextSnapshotSection} contributions
+ * Both messages ride ordinary `UserMessage`s under the host's plugin id with
+ * the `snapshot` context form. Session format V4 admits exactly that shape and
+ * refuses the retired `{ kind: 'plugin', plugin: … }` wrapper at write time.
+ * Released V3 history is not rewritten on disk: the format's read-time
+ * conversion renames one released `plugin` source into `plugin:<producer>`,
+ * dropping the `plugin` key and keeping every payload field, so the read side
+ * here recognizes both identities by exact match. Everything a host reads back
+ * therefore rides named {@link ContextSnapshotSection} contributions
  * distinguished by stable section names, never bespoke source members and
  * never localized body text.
  *
@@ -18,7 +21,7 @@
  * @module @wowyuarm/dsh-context-continuity/message-codec
  */
 
-import type { ContextSnapshotSection, UserMessage } from '@deepseek-ai/dsh-llm'
+import type { ContextSnapshotSection, MessageSource, UserMessage } from '@deepseek-ai/dsh-llm'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { RolloverTrigger } from './types.ts'
 
@@ -36,6 +39,55 @@ export const HANDOFF_TRIGGER = 'Trigger'
 export const HANDOFF_EVENT_SEQ = 'Handoff event seq'
 export const HANDOFF_CHECKPOINT = 'Continued from checkpoint'
 export const HANDOFF_RELATED_FILES = 'Related files'
+
+/**
+ * One source this engine reads. The kind is matched by exact identity against
+ * the producer's own id and the read-time conversion of its released rows —
+ * never by a `plugin:` prefix test, which would claim another producer's
+ * messages as this host's own.
+ */
+interface ProducerSource {
+  readonly kind?: string
+  readonly form?: string
+  readonly sections?: readonly ContextSnapshotSection[]
+}
+
+/**
+ * Format V4 requires every durable message source to carry its producer's own
+ * kind, and it checks nothing else: there is no registry of producer ids, only
+ * "a non-empty kind that is not the retired `plugin` wrapper". Each host
+ * declares its own literal in `MessageSourceMap` in its own module, and this
+ * engine is host-agnostic, so the compiler cannot match a runtime id to that
+ * map — the single cast below is that one boundary. The host's own admission
+ * and read-back tests pin the id it produces, so the value cannot drift
+ * silently.
+ */
+function producerSource(
+  pluginId: string,
+  payload:
+    | { readonly form: 'snapshot'; readonly sections: readonly ContextSnapshotSection[] }
+    | { readonly form: 'notice'; readonly summary: string },
+): MessageSource {
+  return { kind: pluginId, ...payload } as unknown as MessageSource
+}
+
+/**
+ * The source of one snapshot-form context message: the producer's own kind plus
+ * the named contributions it carries.
+ */
+export function producerSnapshotSource(pluginId: string, sections: readonly ContextSnapshotSection[]): MessageSource {
+  return producerSource(pluginId, { form: 'snapshot', sections })
+}
+
+/** The source of one notice-form context message: the producer's own kind plus its one-line account. */
+export function producerNoticeSource(pluginId: string, summary: string): MessageSource {
+  return producerSource(pluginId, { form: 'notice', summary })
+}
+
+/** The read-time conversion of one producer's released V3 rows, as format V4 renames them. */
+export function v3RenamedSourceKind(pluginId: string): string {
+  return `plugin:${pluginId}`
+}
 
 /**
  * Host-specific codec configuration. `pluginId` attributes every message and
@@ -111,12 +163,7 @@ export class ContextMessageCodec {
   createHandoffMessage(input: HandoffInput): UserMessage {
     return createUserMessage({
       content: [{ type: 'text', text: this.handoffBody(input) }],
-      source: {
-        kind: 'plugin',
-        plugin: this.config.pluginId,
-        form: 'snapshot',
-        sections: this.handoffSections(input),
-      },
+      source: producerSnapshotSource(this.config.pluginId, this.handoffSections(input)),
     })
   }
 
@@ -124,20 +171,15 @@ export class ContextMessageCodec {
   createCheckpointContinuationMessage(checkpointRef: string): UserMessage {
     return createUserMessage({
       content: [{ type: 'text', text: CHECKPOINT_CONTINUATION_TEXT }],
-      source: {
-        kind: 'plugin',
-        plugin: this.config.pluginId,
-        form: 'snapshot',
-        sections: [{ name: CHECKPOINT_SECTION_NAME, text: checkpointRef }],
-      },
+      source: producerSnapshotSource(this.config.pluginId, [{ name: CHECKPOINT_SECTION_NAME, text: checkpointRef }]),
     })
   }
 
   /** This codec's own snapshot sections on one message, or undefined when another producer owns it. */
   private ownSections(message: UserMessage): readonly ContextSnapshotSection[] | undefined {
-    const source = message.source
-    if (source.kind !== 'plugin' || source.plugin !== this.config.pluginId) return undefined
-    if (source.form !== 'snapshot') return undefined
+    const source: ProducerSource = message.source
+    if (source.kind !== this.config.pluginId && source.kind !== v3RenamedSourceKind(this.config.pluginId)) return undefined
+    if (source.form !== 'snapshot' || source.sections === undefined) return undefined
     return source.sections
   }
 

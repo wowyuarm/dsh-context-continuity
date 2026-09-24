@@ -23,7 +23,7 @@ import {
   type SessionEvent,
   type SessionHeader,
 } from '@deepseek-ai/dsh-session'
-import { ContextMessageCodec } from '../src/message-codec.ts'
+import { ContextMessageCodec, producerNoticeSource } from '../src/message-codec.ts'
 import {
   CONTEXT_CHECKPOINT_TOOL_NAME,
   CONTEXT_ROLLOVER_TOOL_NAME,
@@ -40,8 +40,8 @@ import {
   type ContextTimelineSource,
 } from '../src/timeline.ts'
 import type { StoredSessionInspection, StoredSessionReadResult } from '../src/stored-session-reader.ts'
+import { PLUGIN_ID } from './test-producer.ts'
 
-const PLUGIN_ID = '@example/dsh-subject-continuity'
 const CURRENT = SessionId('session-current')
 const PARENT = SessionId('session-parent')
 const GRANDPARENT = SessionId('session-grandparent')
@@ -94,10 +94,7 @@ function notice(text: string): SessionEvent {
 }
 
 function noticeMessage(text: string): UserMessage {
-  return createUserMessage({
-    content: [{ type: 'text', text }],
-    source: { kind: 'plugin', plugin: PLUGIN_ID, form: 'notice', summary: text },
-  })
+  return createUserMessage({ content: [{ type: 'text', text }], source: producerNoticeSource(PLUGIN_ID, text) })
 }
 
 /** One log numbered by position. */

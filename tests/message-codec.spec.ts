@@ -18,9 +18,10 @@ import {
   HANDOFF_RELATED_FILES,
   HANDOFF_SECTION_NAME,
   HANDOFF_TRIGGER,
+  producerNoticeSource,
+  producerSnapshotSource,
 } from '../src/message-codec.ts'
-
-const PLUGIN_ID = '@example/dsh-subject-continuity'
+import { OTHER_V3_RENAMED_KIND, PLUGIN_ID, V3_RENAMED_KIND } from './test-producer.ts'
 
 function codec(pluginId = PLUGIN_ID): ContextMessageCodec {
   return new ContextMessageCodec({
@@ -30,13 +31,33 @@ function codec(pluginId = PLUGIN_ID): ContextMessageCodec {
   })
 }
 
-/** Build one arbitrary plugin snapshot message, the shape the codec reads back. */
-function snapshot(plugin: string, sections: readonly { name: string; text: string }[], text = 'body'): UserMessage {
+/** Build one producer snapshot message, the shape the codec writes and reads back. */
+function snapshot(producer: string, sections: readonly { name: string; text: string }[], text = 'body'): UserMessage {
   return createUserMessage({
     content: [{ type: 'text', text }],
-    source: { kind: 'plugin', plugin, form: 'snapshot', sections },
+    source: producerSnapshotSource(producer, sections),
   })
 }
+
+/**
+ * Build one row as the format's read-time conversion hands this producer's
+ * released rows back: the renamed kind, no `plugin` key, payload preserved.
+ */
+function released(sections: readonly { name: string; text: string }[], text = 'body'): UserMessage {
+  return createUserMessage({
+    content: [{ type: 'text', text }],
+    source: { kind: V3_RENAMED_KIND, form: 'snapshot', sections },
+  })
+}
+
+/** The named sections of one valid handoff envelope. */
+const ENVELOPE_SECTIONS = [
+  { name: HANDOFF_SECTION_NAME, text: 'handoff' },
+  { name: HANDOFF_PREVIOUS_SESSION, text: 'session-a' },
+  { name: HANDOFF_NEW_SESSION, text: 'session-b' },
+  { name: HANDOFF_TRIGGER, text: 'model' },
+  { name: HANDOFF_EVENT_SEQ, text: '9' },
+]
 
 const FULL_INPUT = {
   handoff: 'Continue the migration from step 3.',
@@ -85,7 +106,7 @@ describe('handoff envelope round trip', () => {
     expect(decoded?.checkpointRef).toBeUndefined()
     expect(decoded?.relatedFiles).toBeUndefined()
     const source = message.source
-    const sectionNames = source.kind === 'plugin' && source.form === 'snapshot'
+    const sectionNames = source.kind === PLUGIN_ID && source.form === 'snapshot'
       ? source.sections.map(section => section.name)
       : []
     expect(sectionNames)
@@ -115,13 +136,7 @@ describe('handoff envelope round trip', () => {
   it('refuses an envelope whose facts are missing or malformed', () => {
     /** The valid envelope with named sections replaced, or dropped when undefined. */
     const envelope = (overrides: Record<string, string | undefined>): UserMessage => snapshot(PLUGIN_ID,
-      [
-        { name: HANDOFF_SECTION_NAME, text: 'handoff' },
-        { name: HANDOFF_PREVIOUS_SESSION, text: 'session-a' },
-        { name: HANDOFF_NEW_SESSION, text: 'session-b' },
-        { name: HANDOFF_TRIGGER, text: 'model' },
-        { name: HANDOFF_EVENT_SEQ, text: '9' },
-      ].flatMap(section => (section.name in overrides
+      ENVELOPE_SECTIONS.flatMap(section => (section.name in overrides
         ? (overrides[section.name] === undefined ? [] : [{ name: section.name, text: overrides[section.name]! }])
         : [section])))
     expect(codec().handoffOf(snapshot(PLUGIN_ID, [{ name: HANDOFF_SECTION_NAME, text: 'handoff' }]))).toBeUndefined()
@@ -157,14 +172,39 @@ describe('checkpoint continuation', () => {
 })
 
 describe('attribution and cross-talk', () => {
+  it('writes the producer\'s own kind and never the retired plugin wrapper', () => {
+    // Format V4 admits a source only under its producer's own kind, and refuses
+    // `{ kind: 'plugin', plugin }` at write time: the wrapper every released
+    // engine wrote would be rejected before it ever reached a log.
+    const handoff = codec().createHandoffMessage(FULL_INPUT)
+    expect(handoff.source.kind).toBe(PLUGIN_ID)
+    expect(handoff.source).not.toHaveProperty('plugin')
+    const continuation = codec().createCheckpointContinuationMessage('checkpoint:3')
+    expect(continuation.source.kind).toBe(PLUGIN_ID)
+    expect(continuation.source).not.toHaveProperty('plugin')
+  })
+
+  it('decodes the converted shape of its released rows, and claims no other producer\'s', () => {
+    // Released V3 history is not rewritten on disk: the format's read-time
+    // conversion renames one `plugin` source into `plugin:<producer>`, dropping
+    // the `plugin` key and keeping every payload field, so envelopes written
+    // before this line still have to decode through this same codec.
+    const envelope = released(ENVELOPE_SECTIONS)
+    expect(codec().isHandoffMessage(envelope)).toBe(true)
+    expect(codec().handoffOf(envelope)?.previousSessionId).toBe('session-a')
+    const continuation = released([{ name: CHECKPOINT_SECTION_NAME, text: 'checkpoint:3' }])
+    expect(codec().continuationCheckpointRefOf(continuation)).toBe('checkpoint:3')
+    // The conversion of another producer's row is still not this codec's.
+    const foreign = createUserMessage({
+      content: [{ type: 'text', text: 'body' }],
+      source: { kind: OTHER_V3_RENAMED_KIND, form: 'snapshot', sections: ENVELOPE_SECTIONS },
+    })
+    expect(codec().isHandoffMessage(foreign)).toBe(false)
+    expect(codec().continuationCheckpointRefOf(foreign)).toBeUndefined()
+  })
+
   it('never recognizes another plugin\'s section names', () => {
-    const foreign = snapshot('@other/plugin', [
-      { name: HANDOFF_SECTION_NAME, text: 'handoff' },
-      { name: HANDOFF_PREVIOUS_SESSION, text: 'session-a' },
-      { name: HANDOFF_NEW_SESSION, text: 'session-b' },
-      { name: HANDOFF_TRIGGER, text: 'model' },
-      { name: HANDOFF_EVENT_SEQ, text: '9' },
-    ])
+    const foreign = snapshot('@other/plugin', ENVELOPE_SECTIONS)
     expect(codec().handoffOf(foreign)).toBeUndefined()
     expect(codec().isHandoffMessage(foreign)).toBe(false)
   })
@@ -172,7 +212,7 @@ describe('attribution and cross-talk', () => {
   it('never recognizes a plain notice from the same plugin', () => {
     const notice = createUserMessage({
       content: [{ type: 'text', text: 'Team Workspace participation changed' }],
-      source: { kind: 'plugin', plugin: PLUGIN_ID, form: 'notice', summary: 'participation changed' },
+      source: producerNoticeSource(PLUGIN_ID, 'participation changed'),
     })
     expect(codec().isContextSource(notice)).toBe(false)
     expect(codec().handoffOf(notice)).toBeUndefined()

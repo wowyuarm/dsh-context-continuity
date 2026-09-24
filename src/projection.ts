@@ -300,19 +300,18 @@ function createStep(config: ContextProjectionConfig): (state: ContextProjectionS
     state: ContextProjectionState,
     event: SessionEvent & { type: 'tool/result' },
   ): ContextProjectionState => {
-    const block = event.data.message.content[0]
-    if (block === undefined || block.type !== 'tool-result') return state
-    const index = state.openCalls.findIndex(call => call.callId === block.toolCallId)
+    const message = event.data.message
+    const index = state.openCalls.findIndex(call => call.callId === message.toolCallId)
     // An unpaired result (no matching open call) touches nothing: the engine
     // only ever reacts to calls it decided to track.
     if (index === -1) return state
     const recorded = state.openCalls[index]!
-    const openCalls = state.openCalls.filter(call => call.callId !== block.toolCallId)
+    const openCalls = state.openCalls.filter(call => call.callId !== message.toolCallId)
     // A landed result — success or failure — consumes its paired open call, so
     // a failed call can never dangle, and a provider retry reusing the call id
     // pairs its fresh result with fresh arguments. Only a successful pair
     // records a checkpoint, an intent, or a boundary.
-    if (block.isError === true || event.data.error !== undefined) return { ...state, openCalls }
+    if (message.isError === true || event.data.error !== undefined) return { ...state, openCalls }
     const seq = event.seq
     const turn = event.data.turn
     if (isRolloverCall(recorded.name)) {
@@ -339,7 +338,7 @@ function createStep(config: ContextProjectionConfig): (state: ContextProjectionS
       const name = parseCheckpointName(recorded.arguments)
       if (name === undefined) return { ...state, openCalls }
       const entry: ContextCheckpointEntry = {
-        checkpointRef: host.checkpointRefFor(state.sessionId, block.toolCallId),
+        checkpointRef: host.checkpointRefFor(state.sessionId, message.toolCallId),
         name,
         resultSeq: seq,
         turn,

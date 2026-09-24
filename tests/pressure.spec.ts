@@ -22,19 +22,21 @@ import {
   type PressureLogSpan,
   type PressureSurface,
 } from '../src/pressure.ts'
-
-const PLUGIN_ID = '@example/dsh-subject-continuity'
-const OTHER_PLUGIN_ID = '@example/other-plugin'
+import { OTHER_PLUGIN_ID, PLUGIN_ID, V3_RENAMED_KIND } from './test-producer.ts'
 
 const BUDGETS: PressureLimits = { usageTokens: 100_000, hardLimit: 256_000, handoffAt: 200_000 }
 
-/** One `user/message` event carrying a plugin notice, at a known seq. */
-function noticeEvent(seq: number, pluginId = PLUGIN_ID, summary = PRESSURE_NOTICE_SUMMARY): SessionEvent {
+/**
+ * One `user/message` event carrying a notice under `kind`, at a known seq. The
+ * default is the producer's own id, which is what this policy writes now; a row
+ * released before format V4 reaches the fold as `plugin:<producer>` instead.
+ */
+function noticeEvent(seq: number, kind: string = PLUGIN_ID, summary = PRESSURE_NOTICE_SUMMARY): SessionEvent {
   return {
     type: 'user/message',
     seq: SessionSeq(seq),
     time: 0,
-    data: { source: { kind: 'plugin', plugin: pluginId, form: 'notice', summary } },
+    data: { source: { kind, form: 'notice', summary } },
   } as unknown as SessionEvent
 }
 
@@ -45,7 +47,7 @@ function splicedEvent(seq: number, pluginId = PLUGIN_ID): SessionEvent {
     seq: SessionSeq(seq),
     time: 0,
     data: {
-      inserted: [{ source: { kind: 'plugin', plugin: pluginId, form: 'notice', summary: PRESSURE_NOTICE_SUMMARY } }],
+      inserted: [{ source: { kind: pluginId, form: 'notice', summary: PRESSURE_NOTICE_SUMMARY } }],
       target: 'next-turn',
     },
   } as unknown as SessionEvent
@@ -193,7 +195,10 @@ describe('the pressure ladder: budget, notice, limit', () => {
     expect(decision.kind).toBe('notice')
     expect(host.steered).toHaveLength(1)
     const notice = host.steered[0]!
-    expect(notice.source).toMatchObject({ kind: 'plugin', plugin: PLUGIN_ID, form: 'notice', summary: PRESSURE_NOTICE_SUMMARY })
+    // The notice is attributed under the host's own producer kind: format V4
+    // refuses the retired `{ kind: 'plugin', plugin }` wrapper at write time.
+    expect(notice.source).toMatchObject({ kind: PLUGIN_ID, form: 'notice', summary: PRESSURE_NOTICE_SUMMARY })
+    expect(notice.source).not.toHaveProperty('plugin')
     const text = noticeText(notice)
     expect(text).toContain('210000')
     expect(text).toContain('200000')
@@ -260,6 +265,18 @@ describe('the pressure ladder: budget, notice, limit', () => {
     host.log = span('session-1', 0, noticeEvent(0, OTHER_PLUGIN_ID), noticeEvent(1, PLUGIN_ID, 'Some other notice'))
     expect((await policyFor(host).onPreStep('subject-1', signal())).kind).toBe('notice')
     expect(host.steered).toHaveLength(1)
+  })
+
+  it('a notice written before format V4 still latches through its converted kind', async () => {
+    // Released rows are not rewritten on disk: the format's read-time conversion
+    // renames one `plugin` source into `plugin:<producer>`, so a Session whose
+    // own span already carries a released notice must stay quiet rather than
+    // deliver the same notice a second time.
+    const host = new FakeHost()
+    host.limits = { usageTokens: 200_000, hardLimit: 256_000, handoffAt: 200_000 }
+    host.log = span('session-1', 0, noticeEvent(0, V3_RENAMED_KIND))
+    expect((await policyFor(host).onPreStep('subject-1', signal())).kind).toBe('continue')
+    expect(host.steered).toHaveLength(0)
   })
 
   it('the latch resumes over an appended span without folding it again', async () => {

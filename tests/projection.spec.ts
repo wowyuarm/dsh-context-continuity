@@ -22,7 +22,7 @@ import {
   type UserMessage,
 } from '@deepseek-ai/dsh-llm'
 import { SessionLogOffset, SessionSeq, type SessionEvent, type SessionHeader } from '@deepseek-ai/dsh-session'
-import { ContextMessageCodec } from '../src/message-codec.ts'
+import { ContextMessageCodec, producerNoticeSource } from '../src/message-codec.ts'
 import { continuationDelivered, type ContextProjectionState } from '../src/projection-state.ts'
 import {
   CONTEXT_CHECKPOINT_TOOL_NAME,
@@ -38,8 +38,8 @@ import {
   type DomainBoundaryContribution,
   type DomainBoundaryInput,
 } from '../src/projection.ts'
+import { PLUGIN_ID } from './test-producer.ts'
 
-const PLUGIN_ID = '@example/dsh-subject-continuity'
 const SESSION = 'session-a'
 const OTHER_SESSION = 'session-b'
 
@@ -139,10 +139,7 @@ function external(text: string): UserMessage {
 
 /** One host-owned ephemeral notice the successor generation rederives. */
 function notice(text: string): UserMessage {
-  return createUserMessage({
-    content: [{ type: 'text', text }],
-    source: { kind: 'plugin', plugin: PLUGIN_ID, form: 'notice', summary: text },
-  })
+  return createUserMessage({ content: [{ type: 'text', text }], source: producerNoticeSource(PLUGIN_ID, text) })
 }
 
 /** Thread refs quoted in a text body, the domain vocabulary this spec's host reads. */
@@ -201,7 +198,7 @@ function projectionHarness(options: HarnessOptions = {}) {
   const host: ContextProjectionHost = {
     checkpointRefFor: (sessionId, toolCallId) => `context-checkpoint:${sessionId}:${toolCallId}`,
     boundaryRefFor: (sessionId, seq) => `team-boundary:${sessionId}:${seq}`,
-    isEphemeralNotice: options.ephemeral ?? (message => message.source.kind === 'plugin' && message.source.plugin === PLUGIN_ID),
+    isEphemeralNotice: options.ephemeral ?? (message => message.source.kind === PLUGIN_ID),
     ...(options.tracksCall === undefined ? {} : { tracksCall: options.tracksCall }),
     ...(options.domainBoundaryOf === undefined
       ? {}

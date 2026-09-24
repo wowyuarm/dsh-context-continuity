@@ -40,7 +40,7 @@ import {
   type ToolExecutionToken,
   type ToolRunContext,
 } from '@deepseek-ai/dsh-tools'
-import { ContextMessageCodec } from '../src/message-codec.ts'
+import { ContextMessageCodec, producerNoticeSource } from '../src/message-codec.ts'
 import { CONTEXT_REF_PREFIX, contextRefFor, parseContextRef } from '../src/context-ref.ts'
 import {
   CONTEXT_CHECKPOINT_TOOL_NAME,
@@ -60,8 +60,7 @@ import {
 } from '../src/search.ts'
 import { createSearchTools } from '../src/search-tools.ts'
 import { readContextTimeline, type ContextTimelineSource } from '../src/timeline.ts'
-
-const PLUGIN_ID = '@example/dsh-subject-continuity'
+import { PLUGIN_ID } from './test-producer.ts'
 
 // One real lineage: GRANDPARENT <- PARENT <- CURRENT, plus ABANDONED, a branch
 // off PARENT that is still the subject's own history but no longer on its
@@ -110,10 +109,7 @@ function toolResult(turn: number, callId: string): SessionEvent {
 }
 
 function noticeMessage(text: string): UserMessage {
-  return createUserMessage({
-    content: [{ type: 'text', text }],
-    source: { kind: 'plugin', plugin: PLUGIN_ID, form: 'notice', summary: text },
-  })
+  return createUserMessage({ content: [{ type: 'text', text }], source: producerNoticeSource(PLUGIN_ID, text) })
 }
 
 /** One thing the subject said or was told, at a known time: the searchable text of this spec. */

@@ -19,12 +19,16 @@
  * subject that loses context without those has lost work.
  *
  * The notice's `source.summary` is frozen: hosts read their own history back,
- * and a notice already in a live log has to keep decoding as one.
+ * and a notice already in a live log has to keep decoding as one. It rides the
+ * host's own producer kind — format V4 admits nothing else — and the latch
+ * below recognizes both that kind and the read-time conversion of the released
+ * rows written before it.
  * @module @wowyuarm/dsh-context-continuity/pressure
  */
 
 import { CONTEXT_WINDOW_EXCEEDED_CODE, createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import { producerNoticeSource, v3RenamedSourceKind } from './message-codec.ts'
 import { CONTEXT_ROLLOVER_TOOL_NAME } from './projection.ts'
 
 /**
@@ -172,10 +176,17 @@ export function contextPressureNoticeText(
   ].join(' ')
 }
 
-/** Whether one message is this policy's own one-shot notice. */
+/**
+ * Whether one message is this policy's own one-shot notice. It is attributed
+ * under the host's own producer kind, and the format's read-time conversion of
+ * this producer's released V3 rows renames that kind to `plugin:<id>`; both
+ * identities are this policy's own, matched by exact equality — a `plugin:`
+ * prefix test would claim another producer's notices as its own evidence.
+ */
 function isPressureNotice(pluginId: string, message: unknown): boolean {
-  const source = (message as { readonly source?: { readonly plugin?: unknown; readonly summary?: unknown } } | undefined)?.source
-  return source?.plugin === pluginId && source?.summary === PRESSURE_NOTICE_SUMMARY
+  const source = (message as { readonly source?: { readonly kind?: unknown; readonly summary?: unknown } } | undefined)?.source
+  if (source?.summary !== PRESSURE_NOTICE_SUMMARY) return false
+  return source.kind === pluginId || source.kind === v3RenamedSourceKind(pluginId)
 }
 
 /** Whether one own-span event already carries the notice: surfaced, or queued in a durable splice. */
@@ -268,7 +279,7 @@ export class ContextPressurePolicy<SubjectId> {
             jobs: inHand.jobs,
           }, this.text),
         }],
-        source: { kind: 'plugin', plugin: this.host.pluginId, form: 'notice', summary: PRESSURE_NOTICE_SUMMARY },
+        source: producerNoticeSource(this.host.pluginId, PRESSURE_NOTICE_SUMMARY),
       })
       try {
         this.host.steer(subject, notice)

@@ -14,7 +14,7 @@ import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { ContextContinuityCoordinator } from '../src/coordinator.ts'
 import type { ContextContinuityHost } from '../src/host.ts'
-import { ContextMessageCodec } from '../src/message-codec.ts'
+import { ContextMessageCodec, producerNoticeSource } from '../src/message-codec.ts'
 import { emptyContextProjectionState } from '../src/projection.ts'
 import type {
   ContextCheckpointEntry,
@@ -22,8 +22,8 @@ import type {
   PendingRolloverIntent,
 } from '../src/projection-state.ts'
 import type { TransitionPlan } from '../src/types.ts'
+import { PLUGIN_ID } from './test-producer.ts'
 
-const PLUGIN_ID = '@example/dsh-subject-continuity'
 const SUBJECT = 'member-1'
 const SESSION = 'session-a' as SessionId
 const NEW_SESSION = 'session-b' as SessionId
@@ -105,10 +105,7 @@ const turnEnd = (seq: number): SessionEvent => ({ type: 'turn/end', seq }) as un
 const external = (text: string): UserMessage =>
   createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })
 const notice = (text: string): UserMessage =>
-  createUserMessage({
-    content: [{ type: 'text', text }],
-    source: { kind: 'plugin', plugin: PLUGIN_ID, form: 'notice', summary: text },
-  })
+  createUserMessage({ content: [{ type: 'text', text }], source: producerNoticeSource(PLUGIN_ID, text) })
 
 /** Let queued microtasks and the idle-wait chain run to completion. */
 const settle = async (): Promise<void> => {
@@ -131,7 +128,7 @@ function harness(options: { ephemeral?: (message: UserMessage) => boolean; execu
       plans.push(plan)
     },
     rolloverIdentity: previousSessionId => ({ newSessionId: NEW_SESSION, requestId: `rollover:${previousSessionId}` }),
-    isEphemeralNotice: options.ephemeral ?? (message => message.source.kind === 'plugin'),
+    isEphemeralNotice: options.ephemeral ?? (message => message.source.kind === PLUGIN_ID),
     log: message => {
       logs.push(message)
     },
